@@ -24,11 +24,14 @@ Fetch = Callable[[str, Path], None]
 
 
 def http_fetch(url: str, dest: Path) -> None:
-    """Stream url to dest in chunks. https only; certificates are verified."""
+    """Stream url to dest in chunks. https only, also after redirects; certificates are verified."""
     if not url.lower().startswith("https://"):
         raise ValueError(f"refusing non-https url: {url}")
     with requests.get(url, stream=True, timeout=TIMEOUT_SECONDS) as response:
         response.raise_for_status()
+        for hop in [*response.history, response]:
+            if not str(hop.url).lower().startswith("https://"):
+                raise ValueError(f"refusing redirect to non-https url: {hop.url}")
         with open(dest, "wb") as out:
             out.writelines(response.iter_content(chunk_size=CHUNK_BYTES))
 
