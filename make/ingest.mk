@@ -9,3 +9,9 @@ download:
 data-load:
 	@test -n "$(PARTITION)" || (echo "PARTITION is required" && exit 1)
 	uv run python -m taxi_duration.ingest.load $(PARTITION)
+
+.PHONY: record-hash
+# Usage: make record-hash PARTITION=2025-01
+record-hash:
+	@test -n "$(PARTITION)" || (echo "PARTITION is required" && exit 1)
+	uv run python -m taxi_duration.ingest.source_hash $(PARTITION)
