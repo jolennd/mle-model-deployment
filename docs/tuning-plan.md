@@ -23,6 +23,9 @@ A 60-minute embargo sits before each validation window: training trips must end 
 ## Metric
 RMSE in minutes, mean over the 3 folds. MAE is reported only.
 
+## Reported metrics
+RMSE is the only metric used for any choice. These are reported only, for the CV folds and the test week, for the baseline, the mean reference and the chosen model: MAE, R², median absolute error, mean error (prediction minus actual, to show bias), and RMSE by segment (duration 1 to 10, 10 to 30 and 30 to 60 minutes; airport pickups vs other pickups). Duration segments are [1,10), [10,30) and [30,60] minutes. Airport pickups are pickup location IDs 1, 132 and 138 (Newark, JFK, LaGuardia), and Airport_fee is not used. MAPE is not used, because 1-minute trips make it explode.
+
 ## Baseline
 - RandomForestRegressor with default settings, random_state=42, plus the training-mean reference.
 - Its CV RMSE is locked before tuning starts.
@@ -49,6 +52,9 @@ Apply these steps in order:
 3. If the baseline fails a limit, the candidate with the best mean CV RMSE among those that pass both limits is deployed, and the README says so.
 
 The chosen candidate is then retrained on the full training sample (the same 300,000 trips). The two limits are measured again on the retrained model. If it fails a limit, the next-best passing candidate, ordered by mean CV RMSE, is retrained and checked the same way.
+
+## If no candidate passes the limits
+If no candidate passes the size and speed limits, take the candidate with the best mean CV RMSE and retrain it with max_depth capped, trying 25, 20, 15, 12, 10 and 8 in that order, keeping its other settings. Use the first cap that passes both limits. If max_depth 8 still fails, keep depth 8 and halve n_estimators repeatedly, down to a minimum of 25. Halving rounds down, and the last step uses 25 when half would fall below it. If that still fails, deploy the depth-8, 25-tree model and say in the README that it misses the limits and by how much. Each capped model is scored on the same 3 folds; its mean CV RMSE is reported next to the uncapped candidate's. The final model is retrained on the 300,000-trip sample, the limits are measured again on it, and it is scored once on the test week.
 
 ## Test week
 - Jan 25 to 31 is never used for tuning or choosing.
