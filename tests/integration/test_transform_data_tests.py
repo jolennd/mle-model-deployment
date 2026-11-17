@@ -68,8 +68,13 @@ def assert_dbt_test_passes(path, name):
 def assert_dbt_test_fails(path, name):
     result = _dbt(path, "test", "--select", name)
     out = result.stdout + result.stderr
-    assert result.returncode != 0 and re.search(r"FAIL=1\b", out), (
-        f"{name} did not fail on planted rows:\n{out[-1500:]}"
+    # A compile error also exits non-zero (and counts as ERROR=1), but it never prints
+    # the per-test "FAIL <n> <name>" line, so requiring that line rules it out.
+    assert result.returncode != 0 and re.search(
+        rf"\bFAIL \d+ {re.escape(name)}\b", out
+    ), (
+        f"{name} did not fail with a test failure (non-zero exit and a "
+        f"'FAIL <n> {name}' line) on planted rows:\n{out[-1500:]}"
     )
 
 
