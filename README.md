@@ -141,4 +141,6 @@ Once you have implemented the project code, a typical local workflow looks like 
    curl -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d @sample-request.json
    ```
 
+The warehouse is a single DuckDB file with one writer at a time. Stop notebooks and the API before `make transform`. Notebooks open the warehouse read-only and close the connection in their last cell.
+
 The `app/` package and `sample-request.json` are files you create during the project. Make the sample request match your `/predict` input schema before running the commands above.

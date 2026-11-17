@@ -1,5 +1,6 @@
 """Database access for the duckdb variant. One helper; no ORM."""
 
+from pathlib import Path
 from urllib.parse import urlparse
 
 import duckdb
@@ -19,6 +20,18 @@ def duckdb_path(url: str) -> str:
     return path
 
 
-def connect(read_only: bool = False) -> duckdb.DuckDBPyConnection:
-    """Open the database named by DB_CONN. One writer at a time."""
-    return duckdb.connect(duckdb_path(require_env("DB_CONN")), read_only=read_only)
+def connect(read_only: bool = True) -> duckdb.DuckDBPyConnection:
+    """Open the database named by DB_CONN. One writer at a time.
+
+    Read-only by default. Code that writes (the load step) must pass read_only=False.
+    A lock held by another process raises RuntimeError with a plain message."""
+    path = duckdb_path(require_env("DB_CONN"))
+    try:
+        return duckdb.connect(path, read_only=read_only)
+    except duckdb.IOException as err:
+        if "lock" not in str(err).lower():
+            raise
+        raise RuntimeError(
+            f"{Path(path).name} is locked by another process: "
+            "close notebooks, the API and running loads, then retry."
+        ) from err
