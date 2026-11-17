@@ -179,6 +179,7 @@ data/raw/
 *.onnx
 *.pt
 models/
+!transform/models/
 data/predictions/
 *.duckdb
 *.duckdb.wal
