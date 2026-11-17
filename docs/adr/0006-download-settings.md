@@ -1,0 +1,5 @@
+# ADR 6: Download settings
+Status: accepted
+Context: The download step needs a host, a file name pattern, the partitions and a folder for the saved files. The code must not hard-code full links. These settings are shared, so adding them to config.py needs approval, which the project owner gave on 2026-11-17.
+Decision: config.py gets four settings: DOWNLOAD_BASE_URL (https://d37ci6vzurychx.cloudfront.net/trip-data), DOWNLOAD_FILE_PATTERN (yellow_tripdata_{partition}.parquet), PARTITIONS (["2025-01"]) and STAGING_DIR (data/raw). The link for a partition is built from the base URL and the pattern. A partition not in PARTITIONS is refused. The staging folder is git-ignored. None of these is a secret; the database connection stays in DB_CONN.
+Consequences: Adding a month later means adding it to PARTITIONS and recording its hash. The source host is a single point of failure; a failed download raises and leaves no file behind. The TLC publishes no official hash, so the first download is trusted and later changes are detected (docs/02-data-sources.md).
