@@ -1929,7 +1929,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "great-expectations", specifier = ">=1.23.1" },
     { name = "matplotlib", specifier = ">=3.11.2" },
-    { name = "mlflow", specifier = ">=3.16.1" },
+    { name = "mlflow", specifier = "==3.17.2" },
     { name = "numpy", specifier = ">=2.5.3" },
     { name = "optuna", specifier = ">=5.0.0" },
     { name = "pandas", specifier = ">=3.0.6" },

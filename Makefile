@@ -9,7 +9,7 @@ export UV_LOCKED := 1
 -include make/transform.mk
 -include make/orchestrate.mk
 -include make/assistant.mk
-.PHONY: test-fast test test-behavioral lint format validate-gates check-versions reference-record upgrade-check
+.PHONY: test-fast test test-behavioral lint format validate-gates check-versions reference-record upgrade-check mlflow-server api
 
 test-fast:
 	uv run pytest -m "not dbserver and not docker and not deploy and not model and not data and not transform and not reference and not behavioral"
@@ -23,6 +23,12 @@ lint:
 format:
 	uv run ruff format .
 validate-gates: lint test-fast
+
+# Local servers. Host, port and stores come from .env; both bind to the loopback address.
+mlflow-server:
+	uv run mlflow server --host $(MLFLOW_HOST) --port $(MLFLOW_PORT) --backend-store-uri $(MLFLOW_BACKEND_STORE_URI) --artifacts-destination $(MLFLOW_ARTIFACTS_DESTINATION) --serve-artifacts
+api:
+	uv run uvicorn app.main:app --host $(API_HOST) --port $(API_PORT)
 
 # Versions: list direct dependencies with a newer release. Upgrade only through upgrade-check.
 check-versions:
