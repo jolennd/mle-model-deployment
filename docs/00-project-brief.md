@@ -5,7 +5,7 @@ Users: Solo project (course deliverable). Predictions are served locally by an A
 Constraints: Everything runs locally; every port is bound to 127.0.0.1. Data is one static file. Trips outside 1 to 60 minutes are out of scope, so predictions for them are not validated. In the data, trip_distance is the measured distance after the trip; at request time it can only be an estimate, so reported RMSE is optimistic for real requests (ADR to follow).
 
 ## Fill this block when kind is ml
-Label and definition: Trip duration in minutes, dropoff minus pickup. Only trips of 1 to 60 minutes are in scope, in training and in the test week.
+Label and definition: Trip duration in minutes, dropoff minus pickup. Only trips of 1 to 60 minutes are in scope, in training and in the test week. Only pickups on or after 2025-01-01 00:00 and before 2025-02-01 00:00 count. Trips with dropoff before pickup are dropped as data errors. The cleaning happens in the staging transform, and the dropped row counts are reported in an ADR.
 Label horizon (how far ahead of the prediction time the label is measured): 60 minutes cap (same as the scope filter).
 Split unit (the group kept whole in one split, for example a customer or a month): Time, by pickup date. Train Jan 1 to 24, test Jan 25 to 31. The test week stays locked until the baseline lock exists.
 Embargo: 60 minutes. Training keeps only trips whose dropoff is before 2025-01-25 00:00.
