@@ -121,20 +121,21 @@ If you create a notebook to explore the data, select the Python environment crea
 
 Once you have implemented the project code, a typical local workflow looks like this:
 
-1. Train the model and log runs to the local `mlruns/` directory with MLflow.
-2. Start the tracking UI:
+1. Copy `.env.example` to `.env`. All hosts, ports and stores are read from it.
+2. Start the MLflow server (sqlite store, artifacts in `mlartifacts/`, UI at http://127.0.0.1:5001):
 
    ```bash
-   uv run mlflow ui --backend-store-uri ./mlruns --port 5000
+   make mlflow-server
    ```
 
-3. Run the API locally:
+3. Train the model. Runs are logged through the server at `MLFLOW_TRACKING_URI`.
+4. Run the API locally (http://127.0.0.1:8000):
 
    ```bash
-   uv run uvicorn app.main:app --reload --port 8000
+   make api
    ```
 
-4. Send a request to the API:
+5. Send a request to the API:
 
    ```bash
    curl -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d @sample-request.json
