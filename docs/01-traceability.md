@@ -12,3 +12,5 @@
 | R10 | The API loads the model only by alias with the pinned hash checked, and reports ready only after the check | endpoint (planned) | tests/test_verify_model.py::test_hash_mismatch_is_refused; ::test_missing_pinned_hash_is_refused; ::test_verify_then_load_by_alias_end_to_end; tests/integration/test_contract_api.py::test_not_ready_until_model_verified | open |
 | R11 | train, tune and evaluate run through the CLI | training (planned) | tests/integration/test_cli.py::test_train_tune_evaluate_commands_exit_zero | open |
 | R12 | The 1 to 60 minute scope is applied the same way to training and test rows | training (planned) | tests/unit/test_labels.py::test_scope_filter_keeps_only_1_to_60_minutes; ::test_scope_filter_same_for_train_and_test | open |
+
+Note: the raw load reads the expected source hash from `tests/reference/source_sha256.txt` (path in `src/taxi_duration/ingest/load.py`). This is left as is, because the API container does not load raw data.

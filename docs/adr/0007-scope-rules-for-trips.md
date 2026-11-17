@@ -19,5 +19,5 @@ Rows removed on the training days (pickups Jan 1 to 24, 2641485 rows in stg_trip
 | 5. Dropoff on or after 2025-01-25 | 1994 | 1902 |
 | All rules | | 123518 |
 
-Rows kept for training: 2641485 - 123518 = 2517967. The test week counts are not read here; they are reported by the evaluation step after the baseline lock exists.
+Rows kept for training: 2641485 - 123518 = 2517967. No test week rows are read for this ADR; test week counts are reported by the evaluation step after the baseline lock exists.
 Consequences: Reported RMSE covers valid trips only. The README says so next to the RMSE, together with the speed filter and the distance caveat from ADR 2. Predictions for requests outside the ranges are refused (422) or, for duration, not validated. Requests for zone 264 are refused, although 9245 training day rows (0.35 percent) had it as a dropoff and 6212 (0.24 percent) as a pickup. The speed filter removes trips with a bad distance reading but also fast real trips; at 80 mph that is a very small share. Changing a bound later needs a new ADR and a new locked baseline.

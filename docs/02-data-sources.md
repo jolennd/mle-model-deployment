@@ -9,7 +9,7 @@
 
 ## Data layer decisions
 - Partition format: YYYY-MM, one partition: 2025-01.
-- Trip key: the source has no natural key. `trip_id` is a hash of the partition and all source columns plus an occurrence number among identical rows. Exact duplicates stay in and are counted.
+- Trip key: the source has no natural key. `trip_id` is a hash of the partition and all source columns plus an occurrence number among identical rows. The key keeps any exact duplicates distinct, and they stay in. Duplicates were measured on the training days only (pickups Jan 1 to 24): none were found. The test week was not inspected, so duplicates there are unknown.
 - Staging rename map: VendorID to vendor_id, tpep_pickup_datetime to pickup_at, tpep_dropoff_datetime to dropoff_at, RatecodeID to rate_code_id, PULocationID to pickup_zone_id, DOLocationID to dropoff_zone_id, Airport_fee to airport_fee. Other columns lowercased. trip_distance unchanged.
 - Mart columns: trip_id, pickup_at, dropoff_at, pickup_zone_id, dropoff_zone_id, trip_distance. passenger_count stays in staging only.
 - Drop reasons are exclusive and counted in order: date window first, then dropoff before pickup.
@@ -27,7 +27,7 @@ First real run, 2026-11-17. Raw rows equal kept rows plus dropped rows: 3475226 
 | Kept (staging output) | 3475080 |
 
 ## Exploration findings (training days, pickups Jan 1 to 24)
-Source: `notebooks/01_exploration.ipynb`, run on `stg_trips` rows with pickup from 2025-01-01 up to but not including 2025-01-25 (2641485 rows). The test week is not read. Re-run with `make notebook-run`. Findings only; decisions go in ADR 7.
+Source: `notebooks/01_exploration.ipynb`, run on `stg_trips` rows with pickup from 2025-01-01 up to but not including 2025-01-25 (2641485 rows). The test week is not read. The notebook reads `DB_CONN` from the `.env` file itself when it is not set, because it runs from `notebooks/` where `.env` is not loaded; this is an exception for the notebook only, and the package code reads the environment only. Re-run with `make notebook-run`. Findings only; decisions go in ADR 7.
 
 - Exact duplicates: none. 2641485 rows and 2641485 distinct rows across the 20 source columns, 0 duplicate groups.
 - Distance: 0 null, 0 negative, 67392 zero (46620 of them inside the 1 to 60 minute trips). Quantiles: p50 1.670 miles, p99 19.620, p99.99 60.309, max 276423.570. The top 20 values are all between 109183.020 and 276423.570 miles. 117 trips of 1 to 60 minutes have more than 50 miles.
