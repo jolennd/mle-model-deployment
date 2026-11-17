@@ -1,0 +1,17 @@
+# Opens a pull request when a pinned dependency or GitHub Action has a new release.
+# CI runs on the pull request. Merge only after make upgrade-check passes locally.
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 14  # skip releases younger than two weeks
+    open-pull-requests-limit: 5
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 14

@@ -1,0 +1,5 @@
+# Pins every project gets, installed by tools/bootstrap.py with uv add. Exact versions only.
+verified = "2026-11-07"
+
+[dependencies]
+dev = ["pytest==9.2.0", "ruff==0.17.3"]

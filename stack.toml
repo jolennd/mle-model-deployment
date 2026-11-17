@@ -1,0 +1,10 @@
+# One choice per axis (tool area). Use "later" for an axis you do not need yet.
+# Changing this file needs an ADR and approval.
+[stack]
+database = "duckdb"
+transform = "dbt"
+orchestrator = "later"
+cli = "click"
+registry = "mlflow"
+deploy = "later"
+monitoring = "later"

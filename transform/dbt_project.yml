@@ -1,0 +1,9 @@
+name: transform
+version: "1.0.0"
+profile: transform
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+models:
+  transform:
+    +materialized: view
