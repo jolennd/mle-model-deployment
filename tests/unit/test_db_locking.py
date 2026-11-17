@@ -80,9 +80,8 @@ def test_explicit_write_connection_still_writes(db_conn):
 @pytest.mark.parametrize("read_only", [True, False])
 def test_locked_file_gives_a_clear_message(db_conn, read_only):
     make_database(db_conn)
-    with other_process_holds_writer(db_conn):
-        with pytest.raises(RuntimeError) as err:
-            connect(read_only=read_only)
+    with other_process_holds_writer(db_conn), pytest.raises(RuntimeError) as err:
+        connect(read_only=read_only)
     message = str(err.value)
     assert f"{db_conn.name} is locked by another process" in message
     assert "close notebooks, the API and running loads, then retry" in message
