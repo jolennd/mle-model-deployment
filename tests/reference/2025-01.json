@@ -1,0 +1,45 @@
+{
+  "description": "Partition 2025-01 after make data-load and make transform",
+  "checks": [
+    {
+      "name": "rows_raw",
+      "sql": "select count(*) from raw_trips",
+      "value": 3475226
+    },
+    {
+      "name": "rows_staging",
+      "sql": "select count(*) from stg_trips",
+      "value": 3475080
+    },
+    {
+      "name": "rows_mart",
+      "sql": "select count(*) from mart_trips",
+      "value": 3475080
+    },
+    {
+      "name": "mart_distinct_trip_ids",
+      "sql": "select count(distinct trip_id) from mart_trips",
+      "value": 3475080
+    },
+    {
+      "name": "dropped_date_window",
+      "sql": "select row_count from stg_trips_drop_counts where reason = 'dropped_date_window'",
+      "value": 22
+    },
+    {
+      "name": "dropped_dropoff_before_pickup",
+      "sql": "select row_count from stg_trips_drop_counts where reason = 'dropped_dropoff_before_pickup'",
+      "value": 124
+    },
+    {
+      "name": "kept",
+      "sql": "select row_count from stg_trips_drop_counts where reason = 'kept'",
+      "value": 3475080
+    },
+    {
+      "name": "rows_staging_training_days",
+      "sql": "select count(*) from stg_trips where pickup_at >= '2025-01-01' and pickup_at < '2025-01-25'",
+      "value": 2641485
+    }
+  ]
+}

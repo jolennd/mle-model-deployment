@@ -34,6 +34,10 @@ flowchart LR
 | [**pyproject.toml**](pyproject.toml) | Project configuration and dependencies. |
 | [**uv.lock**](uv.lock) | Dependency lock file. |
 
+## Data cleaning
+
+January 2025 yellow taxi file: 3,475,226 raw rows; 22 dropped for a pickup outside January 2025 and 124 dropped for a dropoff before the pickup, leaving 3,475,080 rows (see [docs/02-data-sources.md](docs/02-data-sources.md)).
+
 ## Setup
 
 Use [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.13.5 or newer

@@ -7,6 +7,8 @@ export UV_LOCKED := 1
 
 -include make/db.mk
 -include make/transform.mk
+-include make/ingest.mk
+-include make/notebook.mk
 -include make/orchestrate.mk
 -include make/assistant.mk
 .PHONY: test-fast test test-behavioral lint format validate-gates check-versions reference-record upgrade-check mlflow-server api
