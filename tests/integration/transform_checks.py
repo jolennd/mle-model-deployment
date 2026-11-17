@@ -16,7 +16,10 @@ def cases() -> list[str]:
 
 def bad_rows(name: str) -> int:
     r = subprocess.run(
-        [sys.executable, str(BRIDGE), "test"], capture_output=True, text=True
+        [sys.executable, str(BRIDGE), "test"],
+        check=False,
+        capture_output=True,
+        text=True,
     )
     if r.returncode == 0:
         return 0
