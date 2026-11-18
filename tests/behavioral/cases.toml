@@ -1,0 +1,29 @@
+# Behavioral cases for the taxi duration model (regression: checks compare predicted minutes).
+# Approved by jolennd on 2026-11-17 (ADR 8).
+# Agents never add, remove or change a case, tolerance or expected value.
+# Inputs are the four API fields: pickup zone, dropoff zone, trip distance, pickup time.
+
+[[case]]
+id = "mft_jfk_17_miles"
+type = "mft"
+input = { pickup_zone_id = 132, dropoff_zone_id = 230, trip_distance = 17.0, pickup_at = "2025-01-28T10:00:00" }
+expected_min = 25.0
+why = "A 17 mile trip from JFK (zone 132) to Midtown takes well over 25 minutes in New York traffic."
+
+[[case]]
+id = "dir_longer_distance"
+type = "dir"
+input = { pickup_zone_id = 161, dropoff_zone_id = 236, trip_distance = 2.0, pickup_at = "2025-01-28T10:00:00" }
+perturbed = { pickup_zone_id = 161, dropoff_zone_id = 236, trip_distance = 4.0, pickup_at = "2025-01-28T10:00:00" }
+direction = "up"
+min_step = 1.0
+why = "With zones and time fixed, 2 more miles must predict a longer trip, by at least 1 minute."
+
+[[case]]
+id = "dir_rush_hour_not_faster"
+type = "dir"
+input = { pickup_zone_id = 161, dropoff_zone_id = 236, trip_distance = 3.0, pickup_at = "2025-01-28T03:00:00" }
+perturbed = { pickup_zone_id = 161, dropoff_zone_id = 236, trip_distance = 3.0, pickup_at = "2025-01-28T17:00:00" }
+direction = "up"
+min_step = 0.0
+why = "The same trip at 5 pm on a weekday is not faster than at 3 am (traffic)."

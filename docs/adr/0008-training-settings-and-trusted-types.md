@@ -1,0 +1,13 @@
+# ADR 8: Training settings and trusted model types
+Status: accepted
+Context: The training step trains the baseline and needs fixed settings that training, tuning, evaluation and serving all read. config.py is a shared file, so adding to it needs an ADR and approval. The random forest is saved in the safe model format (skops), which refuses types it does not know unless the project lists them.
+Decision:
+1. config.py gets constants for values already fixed by the brief, docs/tuning-plan.md and ADR 7: label horizon and embargo (60 minutes), the scope bounds of ADR 7, the split dates, the sample size (300000) and seed (42), the fold table, the result file paths including LOCK_PATH, the post-trip column list of ADR 2, the feature list, and the model name. No value is new. Changing one later needs a new ADR and a new locked baseline.
+2. Features: trip_distance, pickup hour, pickup day of week, pickup zone id, dropoff zone id. Zone ids are encoded by an ordinal encoder inside the model pipeline, fitted on each training fold only, with unseen zones mapped to -1. Date and day of month are not features, because the test week has dates the model never saw.
+3. The model is registered as taxi-duration with alias baseline. The alias champion is set in the tuning step, on the model the decision rule picks after the size and speed limits are checked. The API serves champion only.
+4. The lock records the source file SHA-256 (from the data record) and a SHA-256 of the sorted trip keys of the sample, so it pins the file and the exact rows.
+5. Trusted types: the allow list is the environment setting MODEL_TRUSTED_TYPES (.env.example). It holds only sklearn.tree._tree.Tree, which the random forest needs. If skops reports another untrusted type for this model, work stops and a new entry needs its own ADR. Never trust all types, and never use the list the model file carries.
+6. Free disk space is checked before any model file is saved, and the saved file size is reported.
+7. The CLI is added with the training step (ADR 5): train and evaluate. Evaluate reads no test rows here; the test week option comes with the tuning and evaluation step.
+8. Behavioral cases (tests/behavioral/cases.toml, three cases: one minimum functionality, two directional) were approved by jolennd on 2026-11-17. Agents do not change them. The kit template is classification-shaped; the project copy compares predicted minutes (see the test file).
+Consequences: One place for each number, so a test can compare plan and code. A model needing another type is blocked until the human approves it. The forest's skops file may be large; the size is measured and reported, and the 300 MB limit of the tuning plan applies in the tuning step.
