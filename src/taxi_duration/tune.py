@@ -269,23 +269,23 @@ def _run_fallback(sample, row, candidate) -> dict:
 
     def check(attempt):
         fitted = _fit(sample, attempt)
-        size, ms = _size_and_speed(fitted, row, MODEL_DIR)
-        tried.append(
-            {
-                "params": attempt,
-                "size_bytes": size,
-                "predict_ms": ms,
-                "mean_cv_rmse": None,
-            }
-        )
+        entry = {"params": attempt, "mean_cv_rmse": None}
+        try:
+            size, ms = _size_and_speed(fitted, row, MODEL_DIR)
+        except RuntimeError:
+            size, ms = artifacts.estimate_size(fitted), None
+            entry["disk_error"] = True
+        entry.update(size_bytes=size, predict_ms=ms)
+        tried.append(entry)
         return size, ms
 
     _, misses = select_fallback(candidate["params"], check)
     # The first passing attempt (or the last one) is the selected one: score it only.
     selected = tried[-1]
-    selected["mean_cv_rmse"] = statistics.fmean(
-        score_params(sample, selected["params"])
-    )
+    if not selected.get("disk_error"):
+        selected["mean_cv_rmse"] = statistics.fmean(
+            score_params(sample, selected["params"])
+        )
     return {
         "from": candidate["name"],
         "attempts": tried,
@@ -379,7 +379,10 @@ def run_tuning(tracking_uri=None) -> dict:
 
     def retrain_check(candidate):
         fitted = _fit(sample, candidate["params"])
-        size, ms = _size_and_speed(fitted, row, MODEL_DIR)
+        try:
+            size, ms = _size_and_speed(fitted, row, MODEL_DIR)
+        except RuntimeError:
+            return None, None  # save or disk error: a failed limit (ADR 8 point 21)
         retrained[candidate["name"]] = (size, ms)
         return size, ms
 
@@ -472,8 +475,9 @@ def register_champion(model_dir, size_bytes, predict_ms, tracking_uri=None) -> d
 
     current = _champion_version(client)
     if current is not None:
-        local = verify_model.download(alias_uri, uri)
+        local = verify_model.download(alias_uri, uri, version=current.version)
         if _registered_skops_sha(local) == source_sha:
+            verify_model.check_model_metadata(local, frozenset(trusted))
             sha = verify_model.model_sha256(local)
             print(f"MODEL_SHA256={sha}")
             return {
@@ -508,8 +512,8 @@ def register_champion(model_dir, size_bytes, predict_ms, tracking_uri=None) -> d
     if _registered_skops_sha(local) != source_sha:
         raise ValueError("registered model.skops differs from the source file")
     client.set_registered_model_alias(config.MODEL_NAME, "champion", version.version)
-    # The hash to pin is that of the folder the alias serves.
-    sha = verify_model.model_sha256(verify_model.download(alias_uri, uri))
+    # The hash to pin is that of the pinned download of the version the alias holds.
+    sha = verify_model.model_sha256(local)
     print(f"MODEL_SHA256={sha}")
     return {
         "name": config.MODEL_NAME,

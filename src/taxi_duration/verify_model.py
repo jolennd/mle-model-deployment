@@ -162,6 +162,14 @@ def download(
     )
 
 
+def resolve_version(model_uri: str, tracking_uri: str) -> str:
+    """One alias lookup: the version the alias points to now."""
+    check_alias_uri(model_uri)
+    name, alias = model_uri[len("models:/") :].split("@", 1)
+    client = mlflow.MlflowClient(tracking_uri=tracking_uri)
+    return str(client.get_model_version_by_alias(name, alias).version)
+
+
 def verify_then_load(
     model_uri: str,
     *,
@@ -171,7 +179,14 @@ def verify_then_load(
     allowed_hosts=LOOPBACK_HOSTS,
     version=None,
 ) -> tuple[Any, str]:
-    """Download, verify, then load from the verified folder. Return (model, hash)."""
+    """Download, verify, then load from the verified folder. Return (model, hash).
+
+    Without version the alias is resolved once and the download is pinned to it.
+    """
+    check_alias_uri(model_uri)
+    check_tracking_uri(tracking_uri, allowed_hosts)
+    if version is None:
+        version = resolve_version(model_uri, tracking_uri)
     local_dir = download(model_uri, tracking_uri, allowed_hosts, version=version)
     sha = verify_local_dir(local_dir, expected_sha256, trusted_types)
     return mlflow.pyfunc.load_model(local_dir), sha
@@ -186,8 +201,12 @@ def main(argv: list[str]) -> int:
     if not tracking_uri:
         raise ValueError("MLFLOW_TRACKING_URI is not set")
     check_strict_tracking_uri(tracking_uri)
-    local_dir = download(argv[0], tracking_uri)
-    check_model_metadata(local_dir, frozenset())
+    check_alias_uri(argv[0])
+    version = resolve_version(argv[0], tracking_uri)
+    local_dir = download(argv[0], tracking_uri, version=version)
+    raw = os.environ.get("MODEL_TRUSTED_TYPES", "")
+    trusted = frozenset(t.strip() for t in raw.split(",") if t.strip())
+    check_model_metadata(local_dir, trusted)
     print(f"MODEL_URI={argv[0]}")
     print(f"MODEL_SHA256={model_sha256(local_dir)}")
     return 0
