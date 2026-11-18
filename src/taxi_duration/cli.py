@@ -3,7 +3,6 @@
 import json
 import logging
 from importlib import metadata
-from pathlib import Path
 
 import click
 
@@ -70,13 +69,10 @@ def train(sample_size: int, n_estimators: int, fmt: str) -> None:
 @click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
 def evaluate(fmt: str) -> None:
     """Print the locked cross-validation scores. Reads the lock file only."""
-    path = Path(config.LOCK_PATH)
-    if not path.is_file():
-        raise click.ClickException(f"baseline lock not found: {path}")
     try:
-        lock = json.loads(path.read_text())
-    except json.JSONDecodeError as exc:
-        raise click.ClickException(f"baseline lock is not valid json: {path}") from exc
+        lock = training.read_lock()
+    except (FileNotFoundError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
     if fmt == "json":
         _emit_json(lock)
     else:

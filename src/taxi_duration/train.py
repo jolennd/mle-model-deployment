@@ -32,6 +32,19 @@ def fold_fingerprints(folds: list[dict]) -> list[dict]:
     ]
 
 
+def read_lock(path=None) -> dict:
+    """Read the baseline lock record; path defaults to the configured lock path."""
+    lock_path = Path(config.LOCK_PATH if path is None else path)
+    try:
+        text = lock_path.read_text()
+    except FileNotFoundError:
+        raise FileNotFoundError(f"baseline lock not found: {lock_path}") from None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"baseline lock is not valid JSON: {lock_path}") from exc
+
+
 def _rmse(actual, predicted) -> float:
     return float(np.sqrt(np.mean((np.asarray(actual) - np.asarray(predicted)) ** 2)))
 
