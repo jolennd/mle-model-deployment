@@ -6,10 +6,12 @@ run_tuning and register_champion functions at the bottom are thin glue.
 """
 
 import json
+import shutil
 import statistics
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 import optuna
 
@@ -21,6 +23,7 @@ MAX_SECONDS = 45 * 60
 MIN_GAIN = 0.02
 DEPTH_CAPS = (25, 20, 15, 12, 10, 8)
 MIN_TREES = 25
+DEFAULT_TREES = 100  # scikit-learn default, used for the baseline ({})
 MODEL_DIR = "models/champion_candidate"
 
 
@@ -105,11 +108,20 @@ def measure_predict_ms(fitted, row) -> float:
 def choose_final(baseline, candidates):
     """Decision rule steps 1 to 3. None when nothing passes both limits."""
     passing = [c for c in candidates if _passes(c)]
+    base_mean = _mean(baseline)
+    eligible = [
+        c
+        for c in passing
+        if (base_mean - _mean(c)) / base_mean >= MIN_GAIN
+        and all(x < y for x, y in zip(c["fold_rmse"], baseline["fold_rmse"]))
+    ]
+    if eligible:
+        return min(eligible, key=_mean)
     if _passes(baseline):
-        return choose(baseline, passing)
-    if not passing:
-        return None
-    return min(passing, key=_mean)
+        return baseline
+    if passing:
+        return min(passing, key=_mean)
+    return None
 
 
 def skipped_caps(params) -> list[int]:
@@ -121,6 +133,7 @@ def skipped_caps(params) -> list[int]:
 
 def fallback_attempts(params) -> list[dict]:
     skipped = skipped_caps(params)
+    params = {"n_estimators": DEFAULT_TREES, **params}
     attempts = [{**params, "max_depth": c} for c in DEPTH_CAPS if c not in skipped]
     depth = params.get("max_depth")
     depth = DEPTH_CAPS[-1] if depth is None else min(depth, DEPTH_CAPS[-1])
@@ -150,10 +163,28 @@ def first_passing_after_retrain(ordered_candidates, retrain_check):
 # Glue below: needs real data, not unit tested, run only by the tuning step.
 
 
+class NeedsApproval(RuntimeError):
+    """The run stops for the human; nothing is registered."""
+
+
 def _check_uri(uri: str) -> str:
-    if not uri.startswith(("http://127.0.0.1", "sqlite:///")):
+    """Only an http server on 127.0.0.1, no user info."""
+    parsed = urlparse(uri)
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname != "127.0.0.1"
+        or "@" in parsed.netloc
+    ):
         raise ValueError(f"MLFLOW_TRACKING_URI not allowed: {uri}")
     return uri
+
+
+def prepare_model_dir(path) -> None:
+    """Empty the folder (create it if missing); siblings are never touched."""
+    folder = Path(path)
+    if folder.exists():
+        shutil.rmtree(folder)
+    folder.mkdir(parents=True)
 
 
 def _trusted_types() -> list[str]:
@@ -169,7 +200,8 @@ def _fit(rows, params):
 
 
 def _size_and_speed(fitted, row, folder) -> tuple[int, float]:
-    """Save (sets n_jobs=1), reload with trusted types, time single-row predictions."""
+    """Clear the folder, save (sets n_jobs=1), reload with trusted types, time rows."""
+    prepare_model_dir(folder)
     size = artifacts.save_model(fitted, folder)
     loaded = artifacts.load_model(folder, _trusted_types())
     return size, measure_predict_ms(loaded, row)
@@ -221,22 +253,68 @@ def _log_record(client, experiment_id, record):
     client.set_terminated(run_id)
 
 
+def _run_fallback(sample, row, candidate) -> dict:
+    """Plan fallback: capped retrains, each saved, reloaded, timed and scored."""
+    tried = []
+
+    def check(attempt):
+        fitted = _fit(sample, attempt)
+        size, ms = _size_and_speed(fitted, row, MODEL_DIR)
+        scores = score_params(sample, attempt)
+        tried.append(
+            {
+                "params": attempt,
+                "size_bytes": size,
+                "predict_ms": ms,
+                "mean_cv_rmse": statistics.fmean(scores),
+            }
+        )
+        return size, ms
+
+    _, misses = select_fallback(candidate["params"], check)
+    return {
+        "from": candidate["name"],
+        "attempts": tried,
+        "skipped_caps": skipped_caps(candidate["params"]),
+        "capped_cv_rmse": tried[-1]["mean_cv_rmse"],
+        "uncapped_cv_rmse": _mean(candidate),
+        "misses": misses,
+    }
+
+
 def run_tuning(tracking_uri=None) -> dict:
-    from mlflow import MlflowClient
-
-    uri = _check_uri(tracking_uri or config.require_env("MLFLOW_TRACKING_URI"))
-    client = MlflowClient(tracking_uri=uri)
-    experiment_id = train._experiment_id(client, uri)
-
     sample = splits.draw_sample(splits.load_train())
     folds = splits.make_folds(sample)
     lock = train.read_lock()
+    if train.fingerprint(sample["trip_id"]) != lock["sample_sha256"]:
+        raise ValueError("sample_sha256 differs from the baseline lock")
+    if train.fold_fingerprints(folds) != lock["folds"]:
+        raise ValueError("folds differ from the baseline lock")
+    out = Path(config.RESULTS_DIR) / "trials.json"
+    if out.exists():
+        raise FileExistsError(f"tuning results already exist: {out}")
+
+    from mlflow import MlflowClient
+
+    uri = tracking_uri or _check_uri(config.require_env("MLFLOW_TRACKING_URI"))
+    client = MlflowClient(tracking_uri=uri)
+    experiment_id = train._experiment_id(client, uri)
 
     ms = measure_baseline_ms(sample, folds)
     baseline = baseline_record(lock, ms)
     baseline["params"] = {}
     baseline["fold_rmse"] = [float(x) for x in baseline["fold_rmse"]]
     records = []
+
+    def write(extra):
+        out.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "baseline": baseline,
+            "baseline_size_note": BASELINE_SIZE_NOTE,
+            "trials": records,
+            **extra,
+        }
+        out.write_text(json.dumps(payload, indent=2, sort_keys=True))
 
     def objective(trial):
         params = suggest_params(trial)
@@ -250,35 +328,30 @@ def run_tuning(tracking_uri=None) -> dict:
         }
         records.append(record)
         _log_record(client, experiment_id, record)
+        write({})
         return _mean(record)
 
     study = make_study()
     run_study(study, objective)
     chosen = choose_final(baseline, records)
-
-    def write(extra):
-        out = Path(config.RESULTS_DIR) / "trials.json"
-        out.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "baseline": baseline,
-            "baseline_size_note": BASELINE_SIZE_NOTE,
-            "trials": records,
-            **extra,
-        }
-        out.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    row = features.build_features(sample.iloc[[0]])
 
     if chosen is None:
-        write({"chosen": None})
-        raise RuntimeError(
-            "No candidate passes the size and speed limits. Nothing is registered. "
-            "Report to the human (ADR 8 point 14)."
+        best = min([baseline, *records], key=_mean)
+        fallback = _run_fallback(sample, row, best)
+        write({"chosen": None, "fallback": fallback})
+        message = (
+            "No candidate passes the size and speed limits. The fallback ran. "
+            "Nothing is registered; a human must read trials.json and approve."
         )
+        if fallback["misses"]:
+            message += " No capped model passes: the limits are missed."
+        raise NeedsApproval(message)
 
     others = sorted(
         (c for c in [baseline, *records] if c is not chosen and _passes(c)), key=_mean
     )
     ordered = [chosen, *others]
-    row = features.build_features(sample.iloc[[0]])
     retrained = {}
 
     def retrain_check(candidate):
@@ -290,9 +363,9 @@ def run_tuning(tracking_uri=None) -> dict:
     final = first_passing_after_retrain(ordered, retrain_check)
     if final is None:
         write({"chosen": chosen["name"], "final": None})
-        raise RuntimeError(
-            "No candidate passes the limits after retraining. Nothing is registered. "
-            "Report to the human (ADR 8 point 14)."
+        raise NeedsApproval(
+            "No candidate passes the limits after retraining. Nothing is "
+            "registered; a human must decide."
         )
     size, ms = retrained[final["name"]]
     # The loop stops at the first pass, so MODEL_DIR holds the final model.
@@ -303,18 +376,33 @@ def run_tuning(tracking_uri=None) -> dict:
         "predict_ms": ms,
         "model_dir": MODEL_DIR,
     }
-    write(
-        {
-            "chosen": chosen["name"],
-            "final": result,
-            "skipped_caps": skipped_caps(final["params"]),
-        }
-    )
+    write({"chosen": chosen["name"], "final": result})
     return result
 
 
-def register_champion(model_dir, size_bytes, predict_ms, tracking_uri=None) -> str:
-    """Register the retrained model as taxi-duration@champion; print its SHA-256."""
+def _mlmodel_text(trusted_types) -> str:
+    import yaml
+
+    meta = {
+        "flavors": {
+            "python_function": {
+                "loader_module": "mlflow.sklearn",
+                "model_path": artifacts.MODEL_FILE,
+                "predict_fn": "predict",
+            },
+            "sklearn": {
+                "code": None,
+                "pickled_model": artifacts.MODEL_FILE,
+                "serialization_format": "skops",
+                "skops_trusted_types": list(trusted_types),
+            },
+        },
+    }
+    return yaml.safe_dump(meta, sort_keys=False)
+
+
+def register_champion(model_dir, size_bytes, predict_ms, tracking_uri=None) -> dict:
+    """Register the saved model file as taxi-duration@champion; print its SHA-256."""
     import mlflow
     from mlflow import MlflowClient
 
@@ -322,23 +410,50 @@ def register_champion(model_dir, size_bytes, predict_ms, tracking_uri=None) -> s
 
     if not passes_limits(size_bytes, predict_ms):
         raise ValueError("model fails the size or speed limit; not registering")
-    uri = _check_uri(tracking_uri or config.require_env("MLFLOW_TRACKING_URI"))
-    fitted = artifacts.load_model(model_dir, _trusted_types())
+    uri = tracking_uri or _check_uri(config.require_env("MLFLOW_TRACKING_URI"))
+    trusted = _trusted_types()
+    model_file = Path(model_dir) / artifacts.MODEL_FILE
     client = MlflowClient(tracking_uri=uri)
     experiment_id = train._experiment_id(client, uri)
     mlflow.set_tracking_uri(uri)
-    with mlflow.start_run(experiment_id=experiment_id):
-        info = mlflow.sklearn.log_model(
-            fitted,
-            name="model",
-            serialization_format="skops",
-            skops_trusted_types=_trusted_types(),
-            registered_model_name=config.MODEL_NAME,
+    with tempfile.TemporaryDirectory() as tmp:
+        meta = Path(tmp) / "MLmodel"
+        meta.write_text(_mlmodel_text(trusted))
+        with mlflow.start_run(experiment_id=experiment_id) as run:
+            # The saved file is logged as is: no re-dump, no pickle.
+            mlflow.log_artifact(str(model_file), artifact_path="model")
+            mlflow.log_artifact(str(meta), artifact_path="model")
+        try:
+            client.create_registered_model(config.MODEL_NAME)
+        except mlflow.exceptions.MlflowException:
+            pass  # already registered: add a version
+        version = client.create_model_version(
+            config.MODEL_NAME, f"{run.info.artifact_uri}/model", run.info.run_id
         )
-    client.set_registered_model_alias(
-        config.MODEL_NAME, "champion", info.registered_model_version
-    )
+    client.set_registered_model_alias(config.MODEL_NAME, "champion", version.version)
     local = verify_model.download(f"models:/{config.MODEL_NAME}@champion", uri)
     sha = verify_model.model_sha256(local)
     print(f"MODEL_SHA256={sha}")
-    return sha
+    return {
+        "name": config.MODEL_NAME,
+        "alias": "champion",
+        "version": str(version.version),
+        "sha256": sha,
+    }
+
+
+def register_from_results(tracking_uri=None) -> dict:
+    """Register what run_tuning chose, read from trials.json."""
+    path = Path(config.RESULTS_DIR) / "trials.json"
+    data = json.loads(path.read_text())
+    if data.get("fallback"):
+        raise ValueError("the fallback ran: a human approval is needed first")
+    final = data.get("final")
+    if not final:
+        raise ValueError("no model passed the limits; nothing to register")
+    return register_champion(
+        final["model_dir"],
+        final["size_bytes"],
+        final["predict_ms"],
+        tracking_uri=tracking_uri,
+    )

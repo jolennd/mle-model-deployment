@@ -39,7 +39,7 @@ def _emit_scores(data: dict) -> None:
     "--verbose", "-v", is_flag=True, help="Show debug logs on standard error."
 )
 def cli(verbose: bool) -> None:
-    """Train the baseline, tune the model and show its scores."""
+    """Train the baseline, tune, register and evaluate the model."""
     logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO)
 
 
@@ -81,6 +81,22 @@ def tune_command(fmt: str) -> None:
         click.echo(f"name: {result['name']}")
         click.echo(f"size bytes: {result['size_bytes']}")
         click.echo(f"predict ms: {result['predict_ms']}")
+
+
+@cli.command("register")
+@click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
+def register_command(fmt: str) -> None:
+    """Register the tuned model and set its alias."""
+    try:
+        result = tune.register_from_results()
+    except STEP_ERRORS as exc:
+        raise click.ClickException(str(exc)) from exc
+    if fmt == "json":
+        _emit_json(result)
+    else:
+        click.echo(f"alias: {result['alias']}")
+        click.echo(f"version: {result['version']}")
+        click.echo(f"sha256: {result['sha256']}")
 
 
 @cli.command()
