@@ -44,7 +44,8 @@ def work(tmp_path, monkeypatch, db_conn):
     con.register("trips_df", trips)
     con.execute("CREATE TABLE mart_trips AS SELECT * FROM trips_df")
     con.close()
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
+    # A sqlite store in the environment is refused (ADR 8 point 19): log nothing.
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     return tmp_path
 
 
