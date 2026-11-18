@@ -6,6 +6,7 @@ run_evaluation wires the real one, and only that function is the entry point.
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +15,8 @@ from taxi_duration import config, features, train
 
 TARGET = "duration_minutes"
 AIRPORT_ZONE_IDS = (1, 132, 138)
+MARKER = "test_read_started.json"
+CHAMPION_URI = f"models:/{config.MODEL_NAME}@champion"
 SEGMENTS = (
     "duration_1_10",
     "duration_10_30",
@@ -21,6 +24,20 @@ SEGMENTS = (
     "airport",
     "other",
 )
+
+
+def _guard(results_dir) -> None:
+    """Refuse a second test read: metrics.json, or a marker left by a failed attempt."""
+    folder = Path(results_dir)
+    if (folder / "metrics.json").exists():
+        raise FileExistsError(f"metrics file already exists: {folder / 'metrics.json'}")
+    if (folder / MARKER).exists():
+        raise RuntimeError(
+            f"{MARKER} exists without metrics.json: an earlier attempt may have read "
+            "the test week and failed before writing results. Stopping. Removing the "
+            "marker needs an ADR that says the test week was read more than once "
+            "(ADR 8 point 18)."
+        )
 
 
 def _rmse(error: np.ndarray) -> float:
@@ -76,13 +93,15 @@ def evaluate_test(
     """Score the chosen model and the baseline once on the test rows.
 
     Both loaders run before the test rows are opened, so a failing loader
-    never reads them and writes no file.
+    never reads them and writes no file. The marker is written just before
+    load_test and stays (ADR 8 point 18).
     """
-    target = Path(results_dir) / "metrics.json"
-    if target.exists():
-        raise FileExistsError(f"metrics file already exists: {target}")
+    _guard(results_dir)
     chosen_model = model_loader()
     baseline_model = baseline_loader()
+    marker = Path(results_dir) / MARKER
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(json.dumps({"started_at": datetime.now().isoformat()}))
     frame = load_test()
     feats = features.build_features(frame)
     actual = frame[TARGET].to_numpy()
@@ -110,8 +129,9 @@ def evaluate_test(
             str(frame["pickup_at"].min()),
             str(frame["pickup_at"].max()),
         ]
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(result, indent=2, sort_keys=True))
+    (Path(results_dir) / "metrics.json").write_text(
+        json.dumps(result, indent=2, sort_keys=True)
+    )
     return result
 
 
@@ -175,14 +195,20 @@ def _loader(uri_name: str, sha_name: str, tracking_uri: str, trusted):
     return load
 
 
-def _chosen_params(results_dir):
-    """Final model settings from trials.json, or None if they cannot be read."""
+def _chosen_params(results_dir) -> dict:
+    """Final model settings from trials.json. Loud when missing or unusable."""
+    path = Path(results_dir) / "trials.json"
+    if not path.is_file():
+        raise FileNotFoundError(f"trials.json not found in {results_dir}")
     try:
-        data = json.loads((Path(results_dir) / "trials.json").read_text())
-        params = data["final"]["params"]
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-    return dict(params) if isinstance(params, dict) else None
+        params = json.loads(path.read_text())["final"]["params"]
+    except (ValueError, KeyError, TypeError) as error:
+        raise ValueError(
+            f"trials.json has no usable final.params: {error!r}"
+        ) from error
+    if not isinstance(params, dict):
+        raise ValueError("trials.json final.params is not a dict")  # noqa: TRY004
+    return dict(params)
 
 
 def _factory(params):
@@ -196,48 +222,51 @@ def _factory(params):
 
 def run_evaluation(results_dir=config.RESULTS_DIR) -> dict:
     """Entry point: the one real test read. Not run by tests."""
-    from taxi_duration import splits
+    from mlflow import MlflowClient
 
-    tracking_uri = config.require_env("MLFLOW_TRACKING_URI")
+    from taxi_duration import splits, verify_model
+
+    # 1. strict settings
+    tracking_uri = verify_model.check_strict_tracking_uri(
+        config.require_env("MLFLOW_TRACKING_URI")
+    )
     model_uri = config.require_env("MODEL_URI")
-    config.require_env("MODEL_SHA256")
+    if model_uri != CHAMPION_URI:
+        raise ValueError(f"MODEL_URI must be exactly {CHAMPION_URI}, got {model_uri!r}")
+    expected_sha = config.require_env("MODEL_SHA256")
     trusted = _trusted_types()
 
-    # Training rows only: sample, folds and train mean never touch the test week.
+    # 2. guard, before anything is downloaded or fitted
+    _guard(results_dir)
+    params = _chosen_params(results_dir)
+
+    # 3. one alias lookup, then one pinned download and verification
+    alias = model_uri[len("models:/") :].split("@", 1)[1]
+    version = str(
+        MlflowClient(tracking_uri=tracking_uri)
+        .get_model_version_by_alias(config.MODEL_NAME, alias)
+        .version
+    )
+    champion, sha = verify_model.verify_then_load(
+        model_uri,
+        expected_sha256=expected_sha,
+        tracking_uri=tracking_uri,
+        trusted_types=trusted,
+        version=version,
+    )
+    model_info = {"alias": alias, "version": version, "sha256": sha}
+
+    # 4. the long compute. Training rows only: the test week is not touched.
     sample = splits.draw_sample(splits.load_train())
     lock = train.read_lock()
     folds = splits.make_folds(sample)
     train_mean = float(sample[TARGET].mean())
-
-    factories = {"baseline": features.make_pipeline}
-    params = _chosen_params(results_dir)
-    if params is not None:
-        factories["chosen"] = _factory(params)
-    cv = cv_reports(sample, folds, factories)
-
-    # Filled by the model loader, which runs before the file is written.
-    model_info: dict = {}
-
-    def load_model():
-        from mlflow import MlflowClient
-
-        from taxi_duration import verify_model
-
-        model, sha = verify_model.verify_then_load(
-            model_uri,
-            expected_sha256=config.require_env("MODEL_SHA256"),
-            tracking_uri=tracking_uri,
-            trusted_types=trusted,
-        )
-        name, alias = model_uri[len("models:/") :].split("@", 1)
-        version = MlflowClient(tracking_uri=tracking_uri).get_model_version_by_alias(
-            name, alias
-        )
-        model_info.update(alias=alias, version=str(version.version), sha256=sha)
-        return model
+    cv = cv_reports(
+        sample, folds, {"baseline": features.make_pipeline, "chosen": _factory(params)}
+    )
 
     return evaluate_test(
-        load_model,
+        lambda: champion,
         lambda: refit_baseline(sample, lock),
         load_test=splits.load_test,
         results_dir=results_dir,

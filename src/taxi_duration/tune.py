@@ -5,17 +5,17 @@ ADR 8. The pure parts (search space, choice, limits, fallback) are tested; the
 run_tuning and register_champion functions at the bottom are thin glue.
 """
 
+import hashlib
 import json
 import shutil
 import statistics
 import tempfile
 import time
 from pathlib import Path
-from urllib.parse import urlparse
 
 import optuna
 
-from taxi_duration import artifacts, config, features, splits, train
+from taxi_duration import artifacts, config, features, splits, train, verify_model
 from taxi_duration.train import TARGET
 
 MAX_TRIALS = 30
@@ -60,10 +60,18 @@ def _factory(params):
     return build
 
 
-def score_params(sample, params) -> list[float]:
+def score_params(sample, params, fitted=None) -> list[float]:
+    """RMSE per fold. With fitted (the fold 3 model) folds 1 and 2 are cross-validated
+    and fold 3 is scored on that model, so fold 3 is fitted only once."""
     folds = splits.make_folds(sample)
-    cv = train.cross_validate(sample, folds, pipeline_factory=_factory(params))
-    return [float(x) for x in cv["model"]]
+    if fitted is None:
+        cv = train.cross_validate(sample, folds, pipeline_factory=_factory(params))
+        return [float(x) for x in cv["model"]]
+    cv = train.cross_validate(sample, folds[:-1], pipeline_factory=_factory(params))
+    valid = sample.set_index("trip_id").loc[folds[-1]["valid"]]
+    predicted = fitted.predict(features.build_features(valid))
+    last = train._rmse(valid[TARGET], predicted)
+    return [*(float(x) for x in cv["model"]), float(last)]
 
 
 def _mean(record) -> float:
@@ -85,8 +93,11 @@ def choose(baseline, candidates):
 
 
 def passes_limits(size_bytes, predict_ms) -> bool:
-    return size_bytes < config.MODEL_SIZE_LIMIT_BYTES and predict_ms < (
-        config.MAX_PREDICT_MS
+    if size_bytes is None or predict_ms is None:
+        return False
+    return bool(
+        size_bytes < config.MODEL_SIZE_LIMIT_BYTES
+        and predict_ms < config.MAX_PREDICT_MS
     )
 
 
@@ -167,16 +178,13 @@ class NeedsApproval(RuntimeError):
     """The run stops for the human; nothing is registered."""
 
 
+class _SaveError(RuntimeError):
+    """artifacts.save_model failed (for example not enough disk space)."""
+
+
 def _check_uri(uri: str) -> str:
-    """Only an http server on 127.0.0.1, no user info."""
-    parsed = urlparse(uri)
-    if (
-        parsed.scheme != "http"
-        or parsed.hostname != "127.0.0.1"
-        or "@" in parsed.netloc
-    ):
-        raise ValueError(f"MLFLOW_TRACKING_URI not allowed: {uri}")
-    return uri
+    """Only http://127.0.0.1:5001 (ADR 8 point 19)."""
+    return verify_model.check_strict_tracking_uri(uri)
 
 
 def prepare_model_dir(path) -> None:
@@ -199,21 +207,22 @@ def _fit(rows, params):
     return pipe
 
 
-def _size_and_speed(fitted, row, folder) -> tuple[int, float]:
-    """Clear the folder, save (sets n_jobs=1), reload with trusted types, time rows."""
+def _size_and_speed(fitted, row, folder) -> tuple[int, float | None]:
+    """Clear the folder, save (sets n_jobs=1), reload with trusted types, time rows.
+
+    A model whose estimated size is at or over twice the limit is not saved: the
+    estimate is the size and the speed is None (fails the limits).
+    """
+    estimate = artifacts.estimate_size(fitted)
+    if estimate >= 2 * config.MODEL_SIZE_LIMIT_BYTES:
+        return estimate, None
     prepare_model_dir(folder)
-    size = artifacts.save_model(fitted, folder)
+    try:
+        size = artifacts.save_model(fitted, folder)
+    except RuntimeError as exc:
+        raise _SaveError(str(exc)) from exc
     loaded = artifacts.load_model(folder, _trusted_types())
     return size, measure_predict_ms(loaded, row)
-
-
-def _fold3_measure(sample, folds, params) -> tuple[int, float]:
-    by_id = sample.set_index("trip_id")
-    fit_rows = by_id.loc[folds[-1]["train"]]
-    row = features.build_features(by_id.loc[folds[-1]["valid"]].iloc[[0]])
-    fitted = _fit(fit_rows, params)
-    with tempfile.TemporaryDirectory() as tmp:
-        return _size_and_speed(fitted, row, Path(tmp) / "model")
 
 
 BASELINE_SIZE_BYTES = 2_694_430_930  # measured in the training step (ADR 8 point 15)
@@ -249,7 +258,8 @@ def _log_record(client, experiment_id, record):
         client.log_metric(run_id, f"fold_{number}_rmse", score)
     client.log_metric(run_id, "mean_rmse", _mean(record))
     client.log_metric(run_id, "model_size_bytes", float(record["size_bytes"]))
-    client.log_metric(run_id, "predict_ms", record["predict_ms"])
+    if record["predict_ms"] is not None:
+        client.log_metric(run_id, "predict_ms", record["predict_ms"])
     client.set_terminated(run_id)
 
 
@@ -260,29 +270,40 @@ def _run_fallback(sample, row, candidate) -> dict:
     def check(attempt):
         fitted = _fit(sample, attempt)
         size, ms = _size_and_speed(fitted, row, MODEL_DIR)
-        scores = score_params(sample, attempt)
         tried.append(
             {
                 "params": attempt,
                 "size_bytes": size,
                 "predict_ms": ms,
-                "mean_cv_rmse": statistics.fmean(scores),
+                "mean_cv_rmse": None,
             }
         )
         return size, ms
 
     _, misses = select_fallback(candidate["params"], check)
+    # The first passing attempt (or the last one) is the selected one: score it only.
+    selected = tried[-1]
+    selected["mean_cv_rmse"] = statistics.fmean(
+        score_params(sample, selected["params"])
+    )
     return {
         "from": candidate["name"],
         "attempts": tried,
+        "selected": {
+            "params": selected["params"],
+            "size_bytes": selected["size_bytes"],
+            "predict_ms": selected["predict_ms"],
+            "model_dir": MODEL_DIR,
+        },
         "skipped_caps": skipped_caps(candidate["params"]),
-        "capped_cv_rmse": tried[-1]["mean_cv_rmse"],
+        "capped_cv_rmse": selected["mean_cv_rmse"],
         "uncapped_cv_rmse": _mean(candidate),
         "misses": misses,
     }
 
 
 def run_tuning(tracking_uri=None) -> dict:
+    uri = tracking_uri or _check_uri(config.require_env("MLFLOW_TRACKING_URI"))
     sample = splits.draw_sample(splits.load_train())
     folds = splits.make_folds(sample)
     lock = train.read_lock()
@@ -296,12 +317,10 @@ def run_tuning(tracking_uri=None) -> dict:
 
     from mlflow import MlflowClient
 
-    uri = tracking_uri or _check_uri(config.require_env("MLFLOW_TRACKING_URI"))
     client = MlflowClient(tracking_uri=uri)
     experiment_id = train._experiment_id(client, uri)
 
-    ms = measure_baseline_ms(sample, folds)
-    baseline = baseline_record(lock, ms)
+    baseline = baseline_record(lock, measure_baseline_ms(sample, folds))
     baseline["params"] = {}
     baseline["fold_rmse"] = [float(x) for x in baseline["fold_rmse"]]
     records = []
@@ -318,14 +337,18 @@ def run_tuning(tracking_uri=None) -> dict:
 
     def objective(trial):
         params = suggest_params(trial)
-        size, ms = _fold3_measure(sample, folds, params)
-        record = {
-            "name": f"trial_{trial.number}",
-            "params": params,
-            "fold_rmse": score_params(sample, params),
-            "size_bytes": size,
-            "predict_ms": ms,
-        }
+        by_id = sample.set_index("trip_id")
+        fitted = _fit(by_id.loc[folds[-1]["train"]], params)
+        fold_rmse = score_params(sample, params, fitted=fitted)
+        row = features.build_features(by_id.loc[folds[-1]["valid"]].iloc[[0]])
+        record = {"name": f"trial_{trial.number}", "params": params}
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                size, ms = _size_and_speed(fitted, row, Path(tmp) / "model")
+        except _SaveError:
+            size, ms = artifacts.estimate_size(fitted), None
+            record["disk_error"] = True
+        record.update(fold_rmse=fold_rmse, size_bytes=size, predict_ms=ms)
         records.append(record)
         _log_record(client, experiment_id, record)
         write({})
@@ -401,19 +424,65 @@ def _mlmodel_text(trusted_types) -> str:
     return yaml.safe_dump(meta, sort_keys=False)
 
 
+def _file_sha256(path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _registered_skops_sha(folder) -> str:
+    found = [p for p in Path(folder).rglob(artifacts.MODEL_FILE) if p.is_file()]
+    if len(found) != 1:
+        raise ValueError(f"expected one {artifacts.MODEL_FILE} in the registered files")
+    return _file_sha256(found[0])
+
+
+def _champion_version(client):
+    """The version the champion alias points to, or None when there is no alias."""
+    from mlflow.exceptions import MlflowException
+
+    try:
+        return client.get_model_version_by_alias(config.MODEL_NAME, "champion")
+    except MlflowException as exc:
+        if exc.error_code not in ("RESOURCE_DOES_NOT_EXIST", "INVALID_PARAMETER_VALUE"):
+            raise
+        return None
+
+
 def register_champion(model_dir, size_bytes, predict_ms, tracking_uri=None) -> dict:
-    """Register the saved model file as taxi-duration@champion; print its SHA-256."""
+    """Register the saved model file as taxi-duration@champion; print its SHA-256.
+
+    The registered files are checked (metadata and the model.skops hash against the
+    source file) before the alias moves. Registering the same bytes again is a no-op.
+    """
     import mlflow
     from mlflow import MlflowClient
-
-    from taxi_duration import verify_model
+    from mlflow.exceptions import MlflowException
 
     if not passes_limits(size_bytes, predict_ms):
         raise ValueError("model fails the size or speed limit; not registering")
     uri = tracking_uri or _check_uri(config.require_env("MLFLOW_TRACKING_URI"))
     trusted = _trusted_types()
     model_file = Path(model_dir) / artifacts.MODEL_FILE
+    source_sha = _file_sha256(model_file)
+    alias_uri = f"models:/{config.MODEL_NAME}@champion"
     client = MlflowClient(tracking_uri=uri)
+
+    current = _champion_version(client)
+    if current is not None:
+        local = verify_model.download(alias_uri, uri)
+        if _registered_skops_sha(local) == source_sha:
+            sha = verify_model.model_sha256(local)
+            print(f"MODEL_SHA256={sha}")
+            return {
+                "name": config.MODEL_NAME,
+                "alias": "champion",
+                "version": str(current.version),
+                "sha256": sha,
+            }
+
     experiment_id = train._experiment_id(client, uri)
     mlflow.set_tracking_uri(uri)
     with tempfile.TemporaryDirectory() as tmp:
@@ -425,14 +494,22 @@ def register_champion(model_dir, size_bytes, predict_ms, tracking_uri=None) -> d
             mlflow.log_artifact(str(meta), artifact_path="model")
         try:
             client.create_registered_model(config.MODEL_NAME)
-        except mlflow.exceptions.MlflowException:
-            pass  # already registered: add a version
+        except MlflowException as exc:
+            if (
+                exc.error_code != "RESOURCE_ALREADY_EXISTS"
+                and "already exists" not in str(exc).lower()
+            ):
+                raise
         version = client.create_model_version(
             config.MODEL_NAME, f"{run.info.artifact_uri}/model", run.info.run_id
         )
+    local = verify_model.download(alias_uri, uri, version=version.version)
+    verify_model.check_model_metadata(local, frozenset(trusted))
+    if _registered_skops_sha(local) != source_sha:
+        raise ValueError("registered model.skops differs from the source file")
     client.set_registered_model_alias(config.MODEL_NAME, "champion", version.version)
-    local = verify_model.download(f"models:/{config.MODEL_NAME}@champion", uri)
-    sha = verify_model.model_sha256(local)
+    # The hash to pin is that of the folder the alias serves.
+    sha = verify_model.model_sha256(verify_model.download(alias_uri, uri))
     print(f"MODEL_SHA256={sha}")
     return {
         "name": config.MODEL_NAME,
@@ -442,18 +519,43 @@ def register_champion(model_dir, size_bytes, predict_ms, tracking_uri=None) -> d
     }
 
 
-def register_from_results(tracking_uri=None) -> dict:
+def _check_saved_file(record) -> None:
+    model_file = Path(record["model_dir"]) / artifacts.MODEL_FILE
+    if not model_file.is_file():
+        raise ValueError(f"{artifacts.MODEL_FILE} not found in {record['model_dir']}")
+    actual = model_file.stat().st_size
+    if actual != record["size_bytes"]:
+        raise ValueError(
+            f"saved file size {actual} differs from the recorded size "
+            f"{record['size_bytes']}"
+        )
+
+
+def register_from_results(tracking_uri=None, approved_fallback=False) -> dict:
     """Register what run_tuning chose, read from trials.json."""
+    if tracking_uri is None:
+        _check_uri(config.require_env("MLFLOW_TRACKING_URI"))
     path = Path(config.RESULTS_DIR) / "trials.json"
     data = json.loads(path.read_text())
-    if data.get("fallback"):
-        raise ValueError("the fallback ran: a human approval is needed first")
-    final = data.get("final")
-    if not final:
-        raise ValueError("no model passed the limits; nothing to register")
+    fallback = data.get("fallback")
+    if approved_fallback:
+        if not fallback:
+            raise ValueError("no fallback ran; use plain register")
+        if fallback.get("misses"):
+            raise ValueError("the fallback model misses the size or speed limits")
+        record = fallback.get("selected")
+        if not record:
+            raise ValueError("the fallback has no selected model")
+    else:
+        if fallback:
+            raise ValueError("the fallback ran: a human approval is needed first")
+        record = data.get("final")
+        if not record:
+            raise ValueError("no model passed the limits; nothing to register")
+    _check_saved_file(record)
     return register_champion(
-        final["model_dir"],
-        final["size_bytes"],
-        final["predict_ms"],
+        record["model_dir"],
+        record["size_bytes"],
+        record["predict_ms"],
         tracking_uri=tracking_uri,
     )

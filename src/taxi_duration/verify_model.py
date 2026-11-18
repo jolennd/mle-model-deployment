@@ -62,6 +62,27 @@ def check_tracking_uri(tracking_uri: str, allowed_hosts=LOOPBACK_HOSTS) -> None:
     )
 
 
+def check_strict_tracking_uri(uri: str) -> str:
+    """Accept only http://127.0.0.1:5001, with an optional trailing slash."""
+    try:
+        parsed = urlparse(uri)
+        port = parsed.port
+    except ValueError:
+        raise ValueError(f"MLFLOW_TRACKING_URI not allowed: {uri!r}") from None
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname != "127.0.0.1"
+        or port != 5001
+        or "@" in parsed.netloc
+        or parsed.path not in ("", "/")
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError(f"MLFLOW_TRACKING_URI not allowed: {uri!r}")
+    return uri
+
+
 def model_sha256(model_dir: str | Path) -> str:
     """Hash every file in the model folder: relative path and content, sorted.
 
@@ -120,10 +141,21 @@ def verify_local_dir(
     return actual
 
 
-def download(model_uri: str, tracking_uri: str, allowed_hosts=LOOPBACK_HOSTS) -> str:
-    """Check the URIs, then download the model files to a private folder."""
+def download(
+    model_uri: str,
+    tracking_uri: str,
+    allowed_hosts=LOOPBACK_HOSTS,
+    version=None,
+) -> str:
+    """Check the URIs, then download the model files to a private folder.
+
+    With version, the download is pinned to that version of the alias's model
+    instead of resolving the alias again.
+    """
     check_alias_uri(model_uri)
     check_tracking_uri(tracking_uri, allowed_hosts)
+    if version is not None:
+        model_uri = f"{model_uri.split('@', 1)[0]}/{int(version)}"
     work_dir = tempfile.mkdtemp(prefix="verified-model-")
     return mlflow.artifacts.download_artifacts(
         artifact_uri=model_uri, dst_path=work_dir, tracking_uri=tracking_uri
@@ -137,9 +169,10 @@ def verify_then_load(
     tracking_uri: str,
     trusted_types=frozenset(),
     allowed_hosts=LOOPBACK_HOSTS,
+    version=None,
 ) -> tuple[Any, str]:
     """Download, verify, then load from the verified folder. Return (model, hash)."""
-    local_dir = download(model_uri, tracking_uri, allowed_hosts)
+    local_dir = download(model_uri, tracking_uri, allowed_hosts, version=version)
     sha = verify_local_dir(local_dir, expected_sha256, trusted_types)
     return mlflow.pyfunc.load_model(local_dir), sha
 
@@ -149,7 +182,10 @@ def main(argv: list[str]) -> int:
     if len(argv) != 1:
         print("usage: python -m taxi_duration.verify_model models:/<name>@<alias>")
         return 2
-    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if not tracking_uri:
+        raise ValueError("MLFLOW_TRACKING_URI is not set")
+    check_strict_tracking_uri(tracking_uri)
     local_dir = download(argv[0], tracking_uri)
     check_model_metadata(local_dir, frozenset())
     print(f"MODEL_URI={argv[0]}")

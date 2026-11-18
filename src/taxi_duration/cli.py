@@ -84,11 +84,17 @@ def tune_command(fmt: str) -> None:
 
 
 @cli.command("register")
+@click.option(
+    "--approved-fallback",
+    is_flag=True,
+    default=False,
+    help="Running this is the human approval of the fallback model (ADR 8 point 17).",
+)
 @click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
-def register_command(fmt: str) -> None:
+def register_command(approved_fallback: bool, fmt: str) -> None:
     """Register the tuned model and set its alias."""
     try:
-        result = tune.register_from_results()
+        result = tune.register_from_results(approved_fallback=approved_fallback)
     except STEP_ERRORS as exc:
         raise click.ClickException(str(exc)) from exc
     if fmt == "json":
