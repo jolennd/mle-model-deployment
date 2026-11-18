@@ -70,3 +70,6 @@ CATEGORICAL_FEATURES = ("pickup_zone_id", "dropoff_zone_id")
 
 MODEL_NAME = "taxi-duration"
 BASELINE_ALIAS = "baseline"
+
+# Model size limit of the tuning plan: file size under 300 MB (1 MB = 1,000,000 bytes).
+MODEL_SIZE_LIMIT_BYTES = 300_000_000
