@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from mlflow import MlflowClient
 
-from taxi_duration import config, features, splits
+from taxi_duration import config, features, splits, verify_model
 from taxi_duration.ingest import source_hash
 
 TARGET = "duration_minutes"
@@ -138,6 +138,9 @@ def run_baseline(
     sample_size=config.SAMPLE_SIZE, n_estimators=100, tracking_uri=None
 ) -> dict:
     """Cross-validate the baseline, write the lock, log the run. Never overwrites a lock."""
+    uri = tracking_uri or os.environ.get("MLFLOW_TRACKING_URI")
+    if not tracking_uri and uri:
+        verify_model.check_strict_tracking_uri(uri)
     lock_path = Path(config.LOCK_PATH)
     if lock_path.exists():
         raise FileExistsError(f"baseline lock already exists: {lock_path}")
@@ -152,7 +155,6 @@ def run_baseline(
     lock = build_lock(cv, folds, sample, _source_sha256())
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text(json.dumps(lock, indent=2, sort_keys=True))
-    uri = tracking_uri or os.environ.get("MLFLOW_TRACKING_URI")
     if uri:
         params = {
             "n_estimators": n_estimators,

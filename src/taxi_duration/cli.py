@@ -6,11 +6,13 @@ from importlib import metadata
 
 import click
 
-from taxi_duration import config
+from taxi_duration import config, tune
+from taxi_duration import evaluate as evaluation
 from taxi_duration import train as training
 
 log = logging.getLogger(__name__)
 EXPECTED = (FileNotFoundError, FileExistsError, ValueError, KeyError)
+STEP_ERRORS = (RuntimeError, FileNotFoundError, FileExistsError, ValueError)
 
 
 def _version() -> str:
@@ -37,7 +39,7 @@ def _emit_scores(data: dict) -> None:
     "--verbose", "-v", is_flag=True, help="Show debug logs on standard error."
 )
 def cli(verbose: bool) -> None:
-    """Train the baseline and show its locked score."""
+    """Train the baseline, tune, register and evaluate the model."""
     logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO)
 
 
@@ -65,10 +67,64 @@ def train(sample_size: int, n_estimators: int, fmt: str) -> None:
         click.echo(f"lock: {result['lock_path']}")
 
 
-@cli.command()
+@cli.command("tune")
 @click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
-def evaluate(fmt: str) -> None:
-    """Print the locked cross-validation scores. Reads the lock file only."""
+def tune_command(fmt: str) -> None:
+    """Tune on the training weeks and pick the final model."""
+    try:
+        result = tune.run_tuning()
+    except STEP_ERRORS as exc:
+        raise click.ClickException(str(exc)) from exc
+    if fmt == "json":
+        _emit_json(result)
+    else:
+        click.echo(f"name: {result['name']}")
+        click.echo(f"size bytes: {result['size_bytes']}")
+        click.echo(f"predict ms: {result['predict_ms']}")
+
+
+@cli.command("register")
+@click.option(
+    "--approved-fallback",
+    is_flag=True,
+    default=False,
+    help="Running this is the human approval of the fallback model (ADR 8 point 17).",
+)
+@click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
+def register_command(approved_fallback: bool, fmt: str) -> None:
+    """Register the tuned model and set its alias."""
+    try:
+        result = tune.register_from_results(approved_fallback=approved_fallback)
+    except STEP_ERRORS as exc:
+        raise click.ClickException(str(exc)) from exc
+    if fmt == "json":
+        _emit_json(result)
+    else:
+        click.echo(f"alias: {result['alias']}")
+        click.echo(f"version: {result['version']}")
+        click.echo(f"sha256: {result['sha256']}")
+
+
+@cli.command()
+@click.option(
+    "--test-week",
+    is_flag=True,
+    help="Score the final model and the baseline on the test week (once).",
+)
+@click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
+def evaluate(test_week: bool, fmt: str) -> None:
+    """Print the locked scores, or with --test-week score the test week."""
+    if test_week:
+        try:
+            result = evaluation.run_evaluation()
+        except STEP_ERRORS as exc:
+            raise click.ClickException(str(exc)) from exc
+        if fmt == "json":
+            _emit_json(result)
+        else:
+            click.echo(f"chosen rmse: {result['chosen']['rmse']:.4f}")
+            click.echo(f"baseline rmse: {result['baseline']['rmse']:.4f}")
+        return
     try:
         lock = training.read_lock()
     except (FileNotFoundError, ValueError) as exc:

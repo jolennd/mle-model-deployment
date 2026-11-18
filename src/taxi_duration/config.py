@@ -73,3 +73,5 @@ BASELINE_ALIAS = "baseline"
 
 # Model size limit of the tuning plan: file size under 300 MB (1 MB = 1,000,000 bytes).
 MODEL_SIZE_LIMIT_BYTES = 300_000_000
+# Prediction time limit of the tuning plan: one single-row prediction under 50 ms.
+MAX_PREDICT_MS = 50
