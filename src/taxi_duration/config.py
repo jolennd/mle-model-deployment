@@ -25,6 +25,8 @@ MIN_DISTANCE_MILES = 0.1
 MAX_DISTANCE_MILES = 100
 MAX_SPEED_MPH = 80
 EXCLUDED_ZONE_IDS = (264,)
+# Serving limit of the API (ADR 2); the scope rule MAX_DISTANCE_MILES above stays as is.
+API_MAX_DISTANCE_MILES = 80
 
 # Split: train Jan 1 to 24, test Jan 25 to 31 (brief). Test pickups start at TEST_START.
 TRAIN_START = "2025-01-01"

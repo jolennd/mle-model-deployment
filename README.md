@@ -86,6 +86,17 @@ The data is one month (January 2025). Tuning and the baseline use a sample of 30
 
 MLflow can warn about the Python version when the registered model is loaded. The model file is stored in the safe skops format, and the `MLmodel` file written at registration names no Python version. The project runs on Python 3.13; load the model in the same Python and library versions as training.
 
+## Prediction API
+
+Start the API with `make api` (settings come from `.env`; it binds to 127.0.0.1 only). It loads the verified champion once at startup. Send the sample request from another terminal:
+
+```
+curl -X POST -H "Content-Type: application/json" -d @sample-request.json \
+  http://127.0.0.1:8000/predict
+```
+
+The answer holds `prediction_minutes` and `model_version`. `GET /health` returns `{"ready": true}` when the model is loaded; until then `/predict` answers 503.
+
 ## Setup
 
 Use [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.13.5 or newer
