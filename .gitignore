@@ -190,3 +190,6 @@ mlflow.db
 mlartifacts/
 transform/logs/
 transform/.user.yml
+
+# Rebuilt from the seed; the lock holds the hashes that check it (ADR 8)
+reports/results/cv_folds.json

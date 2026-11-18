@@ -14,10 +14,12 @@ Rows removed on the training days (pickups Jan 1 to 24, 2641485 rows in stg_trip
 |---|---|---|
 | 1. Duration outside 1 to 60 minutes | 54065 | 54065 |
 | 2. Distance outside 0.1 to 100 miles | 83726 | 56282 |
-| 3. Speed above 80 mph | 766 | 134 |
+| 3. Speed above 80 mph | 1290 | 134 |
 | 4. Zone 264 on either side | 12313 | 11135 |
 | 5. Dropoff on or after 2025-01-25 | 1994 | 1902 |
 | All rules | | 123518 |
+
+Note on rule 3 (corrected 2026-11-18, was 766): the code counts zero-duration trips with a positive distance as speed violations (524 rows). The duration rule removes them too, so the added counts and the kept total of 2517967 are unchanged.
 
 Rows kept for training: 2641485 - 123518 = 2517967. No test week rows are read for this ADR; test week counts are reported by the evaluation step after the baseline lock exists.
 Consequences: Reported RMSE covers valid trips only. The README says so next to the RMSE, together with the speed filter and the distance caveat from ADR 2. Predictions for requests outside the ranges are refused (422) or, for duration, not validated. Requests for zone 264 are refused, although 9245 training day rows (0.35 percent) had it as a dropoff and 6212 (0.24 percent) as a pickup. The speed filter removes trips with a bad distance reading but also fast real trips; at 80 mph that is a very small share. Changing a bound later needs a new ADR and a new locked baseline.
