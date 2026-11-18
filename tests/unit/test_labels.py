@@ -1,9 +1,9 @@
 """Label and scope rules (ADR 7): one function for training and test rows, bounds inclusive."""
 
 import pandas as pd
-from taxi_duration.labels import add_label, apply_scope
 
 from taxi_duration import config
+from taxi_duration.labels import add_label, apply_scope
 
 T0 = pd.Timestamp("2024-01-15 12:00:00")
 VALID_MINUTES = 10.0
