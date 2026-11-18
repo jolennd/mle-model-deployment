@@ -26,6 +26,13 @@ class PredictRequest(BaseModel):
     def zone_is_served(cls, value: int) -> int:
         return _check_zone(value)
 
+    @field_validator("pickup_at")
+    @classmethod
+    def pickup_is_naive(cls, value: datetime) -> datetime:
+        if value.tzinfo is not None:
+            raise ValueError("pickup_at must not include a time zone")
+        return value
+
 
 class PredictResponse(BaseModel):
     prediction_minutes: float
