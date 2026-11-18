@@ -97,6 +97,19 @@ curl -X POST -H "Content-Type: application/json" -d @sample-request.json \
 
 The answer holds `prediction_minutes` and `model_version`. `GET /health` returns `{"ready": true}` when the model is loaded; until then `/predict` answers 503.
 
+## Follow-up ideas
+
+- A size-aware search space, or a smaller model family, so a candidate fits the 300 MB limit without a fallback.
+- More months of data than the one month used now.
+- A separate model for long trips and for airport trips, which the segment results show are the hardest.
+- Record the Python version on the logged model, so a load can be checked against it.
+- A Docker container for the API. `pyproject.toml` lists only `src/taxi_duration` as a package, so it must also include `src/app`.
+- Cleanup:
+  - Some modules call other modules' private helpers (train.py uses private source_hash helpers, tune.py uses train._experiment_id). Make them public or move them.
+  - Some tests patch long lists of names and break when code moves. Use fewer, more stable patch points.
+  - verify_model.main shows a traceback when MLFLOW_TRACKING_URI is unset. Print a short message and exit with a code.
+  - run_baseline runs without logging to MLflow when MLFLOW_TRACKING_URI is unset, with no message. It should print a warning.
+
 ## Setup
 
 Use [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.13.5 or newer
@@ -206,4 +219,4 @@ Once you have implemented the project code, a typical local workflow looks like 
 
 The warehouse is a single DuckDB file with one writer at a time. Stop notebooks and the API before `make transform`. Notebooks open the warehouse read-only and close the connection in their last cell.
 
-The `app/` package and `sample-request.json` are files you create during the project. Make the sample request match your `/predict` input schema before running the commands above.
+The API package is `src/app/`, and `sample-request.json` in the project root matches its input schema.
