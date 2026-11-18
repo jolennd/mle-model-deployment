@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from taxi_duration import config, features
+from taxi_duration import config, features, train
 
 TARGET = "duration_minutes"
 AIRPORT_ZONE_IDS = (1, 132, 138)
@@ -94,6 +94,21 @@ def evaluate_test(model_loader, baseline_loader, *, load_test, results_dir) -> d
     return result
 
 
+def refit_baseline(sample, lock, *, pipeline_factory=None):
+    """Refit the baseline in memory (ADR 8 points 15 and 16). Saves and loads no file."""
+    if train.fingerprint(sample["trip_id"]) != lock["sample_sha256"]:
+        raise ValueError(
+            "sample_sha256 does not match the lock: the sample is not the one the "
+            "baseline was locked on. Stopping."
+        )
+    factory = pipeline_factory or features.make_pipeline
+    pipeline = factory()
+    pipeline.fit(features.build_features(sample), sample[TARGET])
+    # n_jobs does not change the fitted trees; one job matches single-row serving
+    pipeline.named_steps["model"].set_params(n_jobs=1)
+    return pipeline
+
+
 def _trusted_types() -> frozenset:
     raw = os.environ.get("MODEL_TRUSTED_TYPES", "")
     return frozenset(t.strip() for t in raw.split(",") if t.strip())
@@ -121,18 +136,12 @@ def run_evaluation(results_dir=config.RESULTS_DIR) -> dict:
     tracking_uri = config.require_env("MLFLOW_TRACKING_URI")
     config.require_env("MODEL_URI")
     config.require_env("MODEL_SHA256")
-    for name in ("BASELINE_MODEL_URI", "BASELINE_MODEL_SHA256"):
-        if not os.environ.get(name):
-            raise ValueError(
-                f"{name} is not set. The baseline is registered only if its file is "
-                f"under {config.MODEL_SIZE_LIMIT_BYTES} bytes; if it is over the "
-                "limit it is not in the store and cannot be scored here. "
-                "Stopping instead of guessing."
-            )
     trusted = _trusted_types()
     return evaluate_test(
         _loader("MODEL_URI", "MODEL_SHA256", tracking_uri, trusted),
-        _loader("BASELINE_MODEL_URI", "BASELINE_MODEL_SHA256", tracking_uri, trusted),
+        lambda: refit_baseline(
+            splits.draw_sample(splits.load_train()), train.read_lock()
+        ),
         load_test=splits.load_test,
         results_dir=results_dir,
     )

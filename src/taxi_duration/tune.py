@@ -184,6 +184,30 @@ def _fold3_measure(sample, folds, params) -> tuple[int, float]:
         return _size_and_speed(fitted, row, Path(tmp) / "model")
 
 
+BASELINE_SIZE_BYTES = 2_694_430_930  # measured in the training step (ADR 8 point 15)
+BASELINE_SIZE_NOTE = (
+    "baseline size from the training step skops file (ADR 8 point 15); "
+    "baseline never saved again, speed measured in memory on the fold 3 refit"
+)
+
+
+def baseline_record(lock, predict_ms) -> dict:
+    return {
+        "name": "baseline",
+        "fold_rmse": lock["fold_scores"],
+        "size_bytes": BASELINE_SIZE_BYTES,
+        "predict_ms": predict_ms,
+    }
+
+
+def measure_baseline_ms(sample, folds) -> float:
+    """Fit the fold 3 baseline in memory and time single-row predictions."""
+    by_id = sample.set_index("trip_id")
+    fitted = _fit(by_id.loc[folds[-1]["train"]], {})
+    row = features.build_features(by_id.loc[folds[-1]["valid"]].iloc[[0]])
+    return measure_predict_ms(fitted, row)
+
+
 def _log_record(client, experiment_id, record):
     run_id = client.create_run(experiment_id).info.run_id
     client.set_tag(run_id, "mlflow.runName", record["name"])
@@ -208,14 +232,10 @@ def run_tuning(tracking_uri=None) -> dict:
     folds = splits.make_folds(sample)
     lock = train.read_lock()
 
-    size, ms = _fold3_measure(sample, folds, {})
-    baseline = {
-        "name": "baseline",
-        "params": {},
-        "fold_rmse": [float(x) for x in lock["fold_scores"]],
-        "size_bytes": size,
-        "predict_ms": ms,
-    }
+    ms = measure_baseline_ms(sample, folds)
+    baseline = baseline_record(lock, ms)
+    baseline["params"] = {}
+    baseline["fold_rmse"] = [float(x) for x in baseline["fold_rmse"]]
     records = []
 
     def objective(trial):
@@ -239,7 +259,12 @@ def run_tuning(tracking_uri=None) -> dict:
     def write(extra):
         out = Path(config.RESULTS_DIR) / "trials.json"
         out.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"baseline": baseline, "trials": records, **extra}
+        payload = {
+            "baseline": baseline,
+            "baseline_size_note": BASELINE_SIZE_NOTE,
+            "trials": records,
+            **extra,
+        }
         out.write_text(json.dumps(payload, indent=2, sort_keys=True))
 
     if chosen is None:
