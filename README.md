@@ -38,6 +38,12 @@ flowchart LR
 
 January 2025 yellow taxi file: 3,475,226 raw rows; 22 dropped for a pickup outside January 2025 and 124 dropped for a dropoff before the pickup, leaving 3,475,080 rows (see [docs/02-data-sources.md](docs/02-data-sources.md)).
 
+## Tuning
+
+The tuning rules are fixed in [docs/tuning-plan.md](docs/tuning-plan.md) and are not changed after results. Run `make tune` with the MLflow server up (`make mlflow-server`). The final metric and its caveats are added here after the single test-week evaluation.
+
+If `make tune` is interrupted or fails, it leaves a partial `reports/results/trials.json`, and the next run refuses to start. To restart, delete `reports/results/trials.json`; earlier MLflow runs remain in the store, so ignore them or remove them by hand.
+
 ## Setup
 
 Use [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.13.5 or newer

@@ -101,6 +101,24 @@ def passes_limits(size_bytes, predict_ms) -> bool:
     )
 
 
+def _limit_reason(size_bytes, predict_ms) -> str:
+    too_big = size_bytes >= config.MODEL_SIZE_LIMIT_BYTES
+    too_slow = predict_ms is not None and predict_ms >= config.MAX_PREDICT_MS
+    if too_big and too_slow:
+        return "size_and_speed_limit"
+    return "size_limit" if too_big else "speed_limit"
+
+
+def _failure(candidate, size_bytes, predict_ms, reason) -> dict:
+    return {
+        "name": candidate["name"],
+        "params": candidate["params"],
+        "size_bytes": size_bytes,
+        "predict_ms": predict_ms,
+        "reason": reason,
+    }
+
+
 def _passes(record) -> bool:
     return passes_limits(record["size_bytes"], record["predict_ms"])
 
@@ -272,7 +290,7 @@ def _run_fallback(sample, row, candidate) -> dict:
         entry = {"params": attempt, "mean_cv_rmse": None}
         try:
             size, ms = _size_and_speed(fitted, row, MODEL_DIR)
-        except RuntimeError:
+        except _SaveError:
             size, ms = artifacts.estimate_size(fitted), None
             entry["disk_error"] = True
         entry.update(size_bytes=size, predict_ms=ms)
@@ -313,7 +331,7 @@ def run_tuning(tracking_uri=None) -> dict:
         raise ValueError("folds differ from the baseline lock")
     out = Path(config.RESULTS_DIR) / "trials.json"
     if out.exists():
-        raise FileExistsError(f"tuning results already exist: {out}")
+        raise FileExistsError(f"delete {out} to restart; earlier MLflow runs remain")
 
     from mlflow import MlflowClient
 
@@ -376,23 +394,31 @@ def run_tuning(tracking_uri=None) -> dict:
     )
     ordered = [chosen, *others]
     retrained = {}
+    failures = []
 
     def retrain_check(candidate):
         fitted = _fit(sample, candidate["params"])
         try:
             size, ms = _size_and_speed(fitted, row, MODEL_DIR)
-        except RuntimeError:
-            return None, None  # save or disk error: a failed limit (ADR 8 point 21)
+        except _SaveError:
+            # save or disk error: a failed limit (ADR 8 point 21)
+            failures.append(_failure(candidate, None, None, "disk_error"))
+            return None, None
         retrained[candidate["name"]] = (size, ms)
+        if not passes_limits(size, ms):
+            failures.append(_failure(candidate, size, ms, _limit_reason(size, ms)))
         return size, ms
 
     final = first_passing_after_retrain(ordered, retrain_check)
     if final is None:
-        write({"chosen": chosen["name"], "final": None})
-        raise NeedsApproval(
-            "No candidate passes the limits after retraining. Nothing is "
-            "registered; a human must decide."
+        write({"chosen": chosen["name"], "final": None, "retrain_failures": failures})
+        message = (
+            f"No candidate passes the limits after retraining ({len(failures)} "
+            "failed). Nothing is registered; a human must decide."
         )
+        if any(f["reason"] == "disk_error" for f in failures):
+            message += " At least one failure was a disk error."
+        raise NeedsApproval(message)
     size, ms = retrained[final["name"]]
     # The loop stops at the first pass, so MODEL_DIR holds the final model.
     result = {
