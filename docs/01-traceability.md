@@ -13,6 +13,6 @@
 | R11 | train, tune and evaluate run through the CLI | training (planned) | tests/integration/test_cli.py::test_train_tune_evaluate_commands_exit_zero | open |
 | R12 | The 1 to 60 minute scope is applied the same way to training and test rows | training (planned) | tests/unit/test_labels.py::test_scope_filter_keeps_only_1_to_60_minutes; ::test_scope_filter_same_for_train_and_test | open |
 
-Note: the raw load reads the expected source hash from `tests/reference/source_sha256.txt` (path in `src/taxi_duration/ingest/load.py`). This is left as is, because the API container does not load raw data.
+Note: the raw load reads the expected source hash from `tests/reference/source_sha256.txt` (path in `src/taxi_duration/ingest/load.py`). This is left as is, because the API container does not load raw data. The training step (train) reads the same record for the lock's source hash. This is also left as is, because the planned container serves the API only and never runs train or the raw load.
 
 Exception (ADR 8 point 3, 2026-11-18): the baseline forest is 2,694,430,930 bytes (measured, models/baseline_size_check/model.skops), about 9 times the 300 MB limit. It is saved once locally to measure the size, logged without the model artifact, and not registered. R3 and R10 are met by a model under the limit, chosen in the tuning step. The training gate item "registered by alias, hash printed" is therefore not met by the baseline, by decision, because of the file size and not the score.
