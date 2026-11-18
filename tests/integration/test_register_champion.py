@@ -78,7 +78,9 @@ def test_registers_the_exact_skops_file_and_pins_the_folder_hash(
 
     client = MlflowClient(store)
     version = client.get_model_version_by_alias(config.MODEL_NAME, "champion")
-    local = vm.download(f"models:/{config.MODEL_NAME}@champion", store)
+    local = vm.download(
+        f"models:/{config.MODEL_NAME}@champion", store, version=result["version"]
+    )
 
     registered = Path(local)
     files = [p for p in registered.rglob("*") if p.is_file()]

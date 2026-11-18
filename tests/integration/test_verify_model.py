@@ -120,7 +120,11 @@ def test_verify_then_load_by_alias_end_to_end(tmp_path):
     MlflowClient(tracking_uri).set_registered_model_alias(
         "taxi", "champion", info.registered_model_version
     )
-    sha = vm.model_sha256(vm.download("models:/taxi@champion", tracking_uri))
+    # the pin comes from a version-pinned download (ADR 8 point 20)
+    pinned = vm.download(
+        "models:/taxi@champion", tracking_uri, version=info.registered_model_version
+    )
+    sha = vm.model_sha256(pinned)
 
     model, got = vm.verify_then_load(
         "models:/taxi@champion", expected_sha256=sha, tracking_uri=tracking_uri
