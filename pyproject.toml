@@ -25,6 +25,9 @@ dependencies = [
     "uvicorn[standard]>=0.54.0",
 ]
 
+[project.scripts]
+taxi_duration = "taxi_duration.cli:cli"
+
 [dependency-groups]
 dev = [
     "httpx2>=2.13.1",
