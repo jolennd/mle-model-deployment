@@ -108,8 +108,14 @@ def test_fallback_when_no_candidate_passes():
     slow = rec("slow", 91.0, ms=config.MAX_PREDICT_MS)
     c = rec("c", 92.0)
     assert tune.choose_final(baseline, [a, too_big, slow, c])["name"] == "c"
-    # Step 3 needs no 2 percent gain
+    # Step 3 applies only when no tuned candidate is eligible under step 1
+    # (2 percent gain, every fold, both limits); then no gain is needed.
     assert tune.choose_final(baseline, [rec("flat", 100.0)])["name"] == "flat"
+    # The 2 percent rule still applies when the baseline fails a limit: an
+    # eligible candidate beats a passing one with a lower mean that is not eligible.
+    eligible = rec("eligible", 90.0)
+    loses_a_fold = {**rec("loses_fold", 0.0), "fold_rmse": [70.0, 70.0, 101.0]}
+    assert tune.choose_final(baseline, [loses_a_fold, eligible])["name"] == "eligible"
     # Steps 1 and 2 still apply when the baseline passes
     ok_base = rec("baseline", 100.0)
     assert tune.choose_final(ok_base, [rec("better", 90.0)])["name"] == "better"

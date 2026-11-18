@@ -12,6 +12,8 @@ Interface to implement in tune.py:
 
 import numpy as np
 import pandas as pd
+import pytest
+from tune_run_support import setup_run
 
 
 def make_frame(n=300):
@@ -77,62 +79,41 @@ class FakeModel:
 
 
 def test_run_tuning_never_saves_the_baseline(monkeypatch, tmp_path):
-    import mlflow
+    """Seams: tune._fit, tune.score_params, tune.measure_predict_ms, tune.run_study,
+    tune.prepare_model_dir, artifacts.save_model and load_model (via setup_run).
 
-    from taxi_duration import artifacts, config, splits, train, tune
+    Intent "the baseline is never saved": zero trials, so the baseline is the only
+    candidate and fails the size limit. The fallback then saves capped models. Every
+    saved model must carry capped params (a depth), never the baseline's {} settings,
+    and the baseline timing must come from measure_baseline_ms on the same objects.
+    """
+    from taxi_duration import splits, tune
 
-    saves = []
+    saved_params = []
 
-    def record_save(*args, **kwargs):
-        saves.append(args)
-        return 1
+    def size_for(p):
+        saved_params.append(dict(p))
+        return 1_000_000
 
-    monkeypatch.setattr(artifacts, "save_model", record_save)
-    monkeypatch.setattr(artifacts, "dump", record_save, raising=False)
-    monkeypatch.setattr(artifacts, "load_model", lambda *a, **k: FakeModel())
-
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5001")
-    monkeypatch.setenv("MODEL_TRUSTED_TYPES", "numpy.ndarray")
-    monkeypatch.setattr(mlflow, "MlflowClient", lambda *a, **k: object())
-    monkeypatch.setattr(train, "_experiment_id", lambda client, uri: "exp")
-    monkeypatch.setattr(config, "RESULTS_DIR", str(tmp_path / "results"))
-    monkeypatch.setattr(tune, "MODEL_DIR", str(tmp_path / "model"))
-
-    df = make_frame()
-    ids = df["trip_id"].tolist()
-    folds = [
-        {"train": ids[:120], "valid": ids[120:170]},
-        {"train": ids[:170], "valid": ids[170:220]},
-        {"train": ids[:220], "valid": ids[220:270]},
-    ]
-    monkeypatch.setattr(splits, "load_train", lambda: df)
-    monkeypatch.setattr(splits, "draw_sample", lambda frame: frame)
-    monkeypatch.setattr(splits, "make_folds", lambda frame: folds)
-    monkeypatch.setattr(
-        train,
-        "read_lock",
-        lambda: {"fold_scores": [4.0, 3.9, 3.8], "sample_sha256": "x"},
-    )
-    monkeypatch.setattr(tune, "run_study", lambda study, objective, **kw: None)
-
+    seen = setup_run(monkeypatch, tmp_path, trials=(), size_for=size_for)
+    df = splits.load_train()
+    folds = splits.make_folds(df)
     timed = []
 
     def fake_measure(sample, fold_list):
         timed.append((sample, fold_list))
         return 1.0
 
-    monkeypatch.setattr(tune, "measure_baseline_ms", fake_measure, raising=False)
+    monkeypatch.setattr(tune, "measure_baseline_ms", fake_measure)
 
-    # No trials run, so no candidate passes the size limit (ADR 8 point 14).
-    # The save assertion comes first so a failure names the real cause.
-    error = None
-    try:
+    with pytest.raises(tune.NeedsApproval):
         tune.run_tuning()
-    except RuntimeError as exc:
-        error = exc
 
-    assert saves == [], f"the baseline was saved {len(saves)} time(s)"
-    assert error is not None and "No candidate passes" in str(error)
+    assert saved_params, "the fallback saved no capped model"
+    assert all(p.get("max_depth") is not None for p in saved_params), (
+        f"a model without a depth cap was saved: {saved_params}"
+    )
+    assert {} not in seen.fits
     assert len(timed) == 1
     assert timed[0][0] is df
     assert timed[0][1] is folds
