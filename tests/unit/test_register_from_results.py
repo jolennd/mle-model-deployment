@@ -40,6 +40,8 @@ def results(monkeypatch, tmp_path):
     folder = tmp_path / "results"
     folder.mkdir()
     monkeypatch.setattr(config, "RESULTS_DIR", str(folder))
+    # register_from_results checks the environment URI itself (ADR 8 point 19)
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5001")
     return folder
 
 
@@ -61,15 +63,20 @@ def write(results, data):
     (results / "trials.json").write_text(json.dumps(data))
 
 
-def test_registers_the_final_model_from_the_file(results, registered):
+def test_registers_the_final_model_from_the_file(results, registered, tmp_path):
     from taxi_duration import tune
 
-    write(results, {"chosen": "trial_4", "final": FINAL, "trials": []})
+    # the saved file must exist with the recorded size (finding 5)
+    model_dir = tmp_path / "candidate"
+    model_dir.mkdir()
+    (model_dir / "model.skops").write_bytes(b"x" * 123_456)
+    final = {**FINAL, "model_dir": str(model_dir)}
+    write(results, {"chosen": "trial_4", "final": final, "trials": []})
 
     got = tune.register_from_results()
 
     assert got == REGISTERED
-    assert registered == [("models/champion_candidate", 123_456, 7.5, None)]
+    assert registered == [(str(model_dir), 123_456, 7.5, None)]
 
     tune.register_from_results(tracking_uri="http://127.0.0.1:5001")
     assert registered[-1][3] == "http://127.0.0.1:5001"

@@ -6,8 +6,8 @@ Interface tune.py must provide:
   against the baseline's fold scores: the best mean (the baseline's own limits do
   not matter). 2) else the baseline if it passes both limits. 3) else the best mean
   among candidates that pass both limits. 4) else None.
-- _check_uri(uri) -> uri: accepts only scheme http, hostname 127.0.0.1 (urllib.parse),
-  with an optional port and path. Anything else raises ValueError.
+- _check_uri(uri) -> uri: accepts only http://127.0.0.1:5001 (optionally with a
+  trailing "/", ADR 8 point 19). Anything else raises ValueError.
   register_champion(..., tracking_uri=...) applies it only to the URI taken from the
   environment, so an explicit local sqlite store still works in tests.
 - prepare_model_dir(path): removes all content under path and recreates it empty;
@@ -82,12 +82,7 @@ def test_step_two_keeps_a_passing_baseline_and_none_when_all_fail():
 
 @pytest.mark.parametrize(
     "uri",
-    [
-        "http://127.0.0.1",
-        "http://127.0.0.1/",
-        "http://127.0.0.1:5001",
-        "http://127.0.0.1:5001/some/path",
-    ],
+    ["http://127.0.0.1:5001", "http://127.0.0.1:5001/"],
 )
 def test_check_uri_accepts_the_loopback_server(uri):
     from taxi_duration import tune
@@ -104,6 +99,10 @@ def test_check_uri_accepts_the_loopback_server(uri):
         "http://localhost:5001",
         "https://127.0.0.1",
         "http://127.0.0.1@evil.com",
+        "http://127.0.0.1",
+        "http://127.0.0.1/",
+        "http://127.0.0.1:5000",
+        "http://127.0.0.1:5001/some/path",
         "",
     ],
 )

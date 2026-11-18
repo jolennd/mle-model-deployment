@@ -13,7 +13,8 @@ Interface tune.py must provide:
   "mean_cv_rmse"}, ...] (tried attempts, in order), "skipped_caps": [...],
   "capped_cv_rmse": mean CV RMSE of the first passing (or last tried) attempt,
   "uncapped_cv_rmse": mean CV RMSE of the candidate, "misses": bool}.
-  Each tried attempt is scored through tune.score_params(sample, params).
+  Only the selected attempt is scored through tune.score_params(sample, params); the
+  other tried attempts have "mean_cv_rmse": None (see test_tune_fallback_scoring.py).
   "skipped_caps" is absent or empty when the fallback did not run.
 - trials.json is rewritten after every completed trial. If it exists when
   run_tuning starts, FileExistsError is raised before any MLflow call.
@@ -105,7 +106,9 @@ def test_fallback_runs_scores_capped_models_and_stops(monkeypatch, tmp_path):
     assert [a["params"]["n_estimators"] for a in tried] == [60, 60]
     assert tried[0]["size_bytes"] == HUGE
     assert tried[1]["size_bytes"] == SMALL
-    assert all(a["mean_cv_rmse"] == pytest.approx(4.0) for a in tried)
+    # only the selected attempt gets the 3-fold CV (finding 7)
+    assert tried[0]["mean_cv_rmse"] is None
+    assert tried[1]["mean_cv_rmse"] == pytest.approx(4.0)
     assert fallback["capped_cv_rmse"] == pytest.approx(4.0)
     assert fallback["uncapped_cv_rmse"] == pytest.approx(3.7)
     assert fallback["misses"] is False
@@ -113,7 +116,7 @@ def test_fallback_runs_scores_capped_models_and_stops(monkeypatch, tmp_path):
     expected = tune.fallback_attempts(DEEP_B)[:2]
     for attempt in expected:
         assert attempt in seen.fits
-        assert attempt in seen.scored
+    assert expected[1] in seen.scored  # the selected attempt only
 
 
 def test_fallback_that_finds_no_model_says_the_limits_are_missed(monkeypatch, tmp_path):

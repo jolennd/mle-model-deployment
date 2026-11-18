@@ -77,12 +77,19 @@ def make_report_sample():
     return sample
 
 
-def test_evaluation_does_not_need_baseline_settings(monkeypatch):
+def test_evaluation_does_not_need_baseline_settings(monkeypatch, tmp_path):
     """Seams stubbed: splits.load_test, splits.load_train, splits.draw_sample,
     train.read_lock, evaluate.evaluate_test and evaluate.refit_baseline.
-    The champion loader is never called because evaluate_test is a stub.
+    The champion is loaded (stub verify_model.verify_then_load) before the CV refits
+    (finding 1); the strict URI and trials.json rules need an env URI on
+    http://127.0.0.1:5001 and a trials.json in results_dir (findings 1 and 2).
     """
-    from taxi_duration import evaluate, splits, train
+    import json
+    from types import SimpleNamespace
+
+    import mlflow
+
+    from taxi_duration import evaluate, splits, train, verify_model
 
     source = inspect.getsource(evaluate)
     assert "BASELINE_MODEL_URI" not in source
@@ -90,9 +97,23 @@ def test_evaluation_does_not_need_baseline_settings(monkeypatch):
 
     monkeypatch.delenv("BASELINE_MODEL_URI", raising=False)
     monkeypatch.delenv("BASELINE_MODEL_SHA256", raising=False)
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", "sqlite:///unused.db")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5001")
     monkeypatch.setenv("MODEL_URI", "models:/taxi-duration@champion")
     monkeypatch.setenv("MODEL_SHA256", "a" * 64)
+
+    (tmp_path / "trials.json").write_text(
+        json.dumps({"final": {"params": {"n_estimators": 5}}})
+    )
+    monkeypatch.setattr(
+        verify_model, "verify_then_load", lambda *a, **k: ("champion", "ab" * 32)
+    )
+    monkeypatch.setattr(
+        mlflow,
+        "MlflowClient",
+        lambda *a, **k: SimpleNamespace(
+            get_model_version_by_alias=lambda name, alias: SimpleNamespace(version=1)
+        ),
+    )
 
     train_rows, sample = object(), make_report_sample()
     lock = {"sample_sha256": "x"}
@@ -137,7 +158,7 @@ def test_evaluation_does_not_need_baseline_settings(monkeypatch):
 
     monkeypatch.setattr(evaluate, "evaluate_test", fake_evaluate_test)
 
-    assert evaluate.run_evaluation() == {"test_reads": 1}
+    assert evaluate.run_evaluation(tmp_path) == {"test_reads": 1}
     assert seen["drawn_from"] is train_rows
     assert seen["refit"][0] is sample
     assert seen["refit"][1] is lock

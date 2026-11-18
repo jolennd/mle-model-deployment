@@ -3,7 +3,8 @@
 Seams patched (all module attributes, so run_tuning sees them as globals):
 tune._fit, tune.measure_baseline_ms, tune.measure_predict_ms, tune.score_params,
 tune.suggest_params, tune.run_study, tune.prepare_model_dir (recorder),
-artifacts.save_model, artifacts.load_model, splits.*, train.read_lock,
+artifacts.save_model, artifacts.load_model, artifacts.estimate_size (FakeFitted has
+no trees; estimate_for gives the size estimate, default small), splits.*, train.read_lock,
 train._experiment_id and mlflow.MlflowClient.
 """
 
@@ -110,6 +111,7 @@ def setup_run(
     size_for=lambda p: SMALL,
     ms_for=lambda p: 1.0,
     scores_for=lambda p: [3.0, 3.0, 3.0],
+    estimate_for=lambda p: SMALL,
     edit_lock=None,
 ):
     import mlflow
@@ -161,7 +163,7 @@ def setup_run(
 
     monkeypatch.setattr(tune, "_fit", fit)
 
-    def score(sample, score_params):
+    def score(sample, score_params, **kwargs):
         seen.scored.append(dict(score_params))
         return list(scores_for(score_params))
 
@@ -197,6 +199,7 @@ def setup_run(
     monkeypatch.setattr(
         artifacts, "load_model", lambda folder, trusted: stored[str(folder)]
     )
+    monkeypatch.setattr(artifacts, "estimate_size", lambda f: estimate_for(f.params))
     return seen
 
 
