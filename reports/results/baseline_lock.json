@@ -1,0 +1,39 @@
+{
+  "fold_scores": [
+    4.395478849025457,
+    4.214824711446683,
+    4.3241267971906785
+  ],
+  "folds": [
+    {
+      "train_rows": 136642,
+      "train_sha256": "d4ba01c8300e4e6e24a7b10a60c7a254c02c3b17ee155fb5b78c04aa36073fa8",
+      "valid_rows": 54718,
+      "valid_sha256": "309c7be34c93776d5e716ba92c4cbf71dffcc3d12c71abe269ac7fd6d1880ad9"
+    },
+    {
+      "train_rows": 191300,
+      "train_sha256": "c1bfe9912e87c593fce0d469429a4be31141d7ba51f49f10497a74757a0400be",
+      "valid_rows": 51438,
+      "valid_sha256": "2484bb6f9c71f24dfb6ee9f25cb7297fa188ad26c05a07b310c58eddc1eefdfb"
+    },
+    {
+      "train_rows": 242797,
+      "train_sha256": "a281041e333129bffc7c37c69ed7d047dc5c406b1644709a43753be8e982d9a6",
+      "valid_rows": 57142,
+      "valid_sha256": "c3e5bda2316b684c3f400b1b342b76e6126279e3f0f95bf26dbdf0c735428522"
+    }
+  ],
+  "mean_reference_mean_rmse": 9.77688704610776,
+  "mean_reference_scores": [
+    9.916612958338012,
+    9.49694041837611,
+    9.917107761609158
+  ],
+  "mean_rmse": 4.311476785887606,
+  "metric": "rmse_minutes",
+  "sample_rows": 300000,
+  "sample_sha256": "ec35d9bfbd2a06aedfcbba843418532d81e0ed3cd6f20e738f18f3f5a749e84a",
+  "seed": 42,
+  "source_sha256": "9af277e4c0d3f9deb30644da822981e1e7df6af58313170fd3aa8a474485488a"
+}

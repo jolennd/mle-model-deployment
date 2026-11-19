@@ -1,7 +1,7 @@
 # Every value comes from DBT_* variables set by transform/dbt_env.py from DB_CONN.
 # A missing variable makes dbt fail loudly. Do not put literal credentials here.
 transform:
-  target: postgres
+  target: duckdb
   outputs:
     postgres:
       type: postgres

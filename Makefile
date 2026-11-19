@@ -7,9 +7,11 @@ export UV_LOCKED := 1
 
 -include make/db.mk
 -include make/transform.mk
+-include make/ingest.mk
+-include make/notebook.mk
 -include make/orchestrate.mk
 -include make/assistant.mk
-.PHONY: test-fast test test-behavioral lint format validate-gates check-versions reference-record upgrade-check
+.PHONY: test-fast test test-behavioral lint format validate-gates check-versions reference-record upgrade-check mlflow-server api tune register evaluate
 
 test-fast:
 	uv run pytest -m "not dbserver and not docker and not deploy and not model and not data and not transform and not reference and not behavioral"
@@ -23,6 +25,22 @@ lint:
 format:
 	uv run ruff format .
 validate-gates: lint test-fast
+
+# Local servers. Host, port and stores come from .env; both bind to the loopback address.
+mlflow-server:
+	uv run mlflow server --host $(MLFLOW_HOST) --port $(MLFLOW_PORT) --backend-store-uri $(MLFLOW_BACKEND_STORE_URI) --artifacts-destination $(MLFLOW_ARTIFACTS_DESTINATION) --serve-artifacts
+api:
+	uv run uvicorn app.main:app --host $(API_HOST) --port $(API_PORT)
+
+# Tuning (docs/tuning-plan.md): runs the pre-registered study through the MLflow server in .env.
+tune:
+	uv run taxi_duration tune
+# Registers the tuned model as taxi-duration@champion and prints the SHA-256 to pin. Run by hand after reading the tune report.
+register:
+	uv run taxi_duration register
+# The one test-week read, after the champion is chosen. Refuses if metrics.json exists.
+evaluate:
+	uv run taxi_duration evaluate --test-week
 
 # Versions: list direct dependencies with a newer release. Upgrade only through upgrade-check.
 check-versions:
