@@ -27,6 +27,7 @@ flowchart LR
 | ------------------------------------ | --------------------------------------- |
 | [**pyproject.toml**](pyproject.toml) | Project configuration and dependencies. |
 | [**uv.lock**](uv.lock)               | Dependency lock file.                   |
+| [**project-description.md**](project-description.md#questions) | The assignment, and my answers to its questions. |
 
 ## Data cleaning
 
@@ -93,9 +94,9 @@ The answer holds `prediction_minutes` and `model_version`. `GET /health` returns
 
 ## Follow-up ideas
 
-- A size-aware search space, or a smaller model family, so a candidate fits the 300 MB limit without a fallback.
+- Build the size limit into the search from the start, so tuning only explores models under 300 MB.
 - More months of data than the one month used now.
-- A separate model for long trips and for airport trips, which the segment results show are the hardest.
+- Try separate models for airport trips and long-distance trips, chosen by zone and distance, which are known at pickup.
 - Record the Python version on the logged model, so a load can be checked against it.
 - A Docker container for the API. `pyproject.toml` lists only `src/taxi_duration` as a package, so it must also include `src/app`.
 - Cleanup:
