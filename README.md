@@ -1,17 +1,15 @@
 # Model Deployment Project
 
-Use this repository as a **template** for your model deployment project. You will train a regression model that predicts the duration of NYC Yellow Taxi trips, track your experiments locally with MLflow, and serve predictions through a FastAPI app on your own machine. Create pull requests in your own copy even if you are working alone, and use them to track your progress.
+This project trains a regression model that predicts the duration of NYC Yellow Taxi trips, tracks experiments locally with MLflow, and serves predictions through a FastAPI app locally.
 
-## Learning Objectives
-
-By the end of this repository, you should be able to:
+## Objectives
 
 - Build an end-to-end regression workflow for real-world taxi trip data.
 - Separate exploration, preprocessing, training, and serving concerns into maintainable code.
 - Track experiments locally with MLflow and compare model runs.
 - Serve model predictions through a local API.
 
-## Learning Path
+## Path
 
 ```mermaid
 flowchart LR
@@ -23,16 +21,12 @@ flowchart LR
     F --> G["Send local<br>test request"]
 ```
 
-| File / Folder | Description |
-|---|---|
-| [**Project Description**](project-description.md) | The assignment tasks, suggested workflow, repository layout, and stretch goals. |
+### Folders and Files
 
-### Additional Folders and Files
-
-| File / Folder | Description |
-|---|---|
+| File / Folder                        | Description                             |
+| ------------------------------------ | --------------------------------------- |
 | [**pyproject.toml**](pyproject.toml) | Project configuration and dependencies. |
-| [**uv.lock**](uv.lock) | Dependency lock file. |
+| [**uv.lock**](uv.lock)               | Dependency lock file.                   |
 
 ## Data cleaning
 
@@ -48,19 +42,19 @@ If `make tune` is interrupted or fails, it leaves a partial `reports/results/tri
 
 The test week (Jan 25 to 31, 2025) was read once, after the model was chosen: 791,334 trips after the scope filters. All numbers are minutes and come from [reports/results/metrics.json](reports/results/metrics.json); the trials come from [reports/results/trials.json](reports/results/trials.json).
 
-| Model | RMSE | MAE | R2 |
-|---|---|---|---|
-| Champion | 4.109 | 2.741 | 0.816 |
-| Baseline | 4.161 | 2.803 | 0.812 |
+| Model          | RMSE  | MAE   | R2     |
+| -------------- | ----- | ----- | ------ |
+| Champion       | 4.109 | 2.741 | 0.816  |
+| Baseline       | 4.161 | 2.803 | 0.812  |
 | Mean reference | 9.591 | 7.117 | -0.000 |
 
 RMSE by segment (duration of the trip, and airport pickups against all others):
 
-| Model | 1 to 10 min | 10 to 30 min | 30 to 60 min | Airport | Other |
-|---|---|---|---|---|---|
-| Champion | 2.101 | 3.850 | 10.161 | 6.389 | 3.936 |
-| Baseline | 2.277 | 3.974 | 9.882 | 6.445 | 3.988 |
-| Mean reference | 7.996 | 5.683 | 26.558 | 21.464 | 8.396 |
+| Model          | 1 to 10 min | 10 to 30 min | 30 to 60 min | Airport | Other |
+| -------------- | ----------- | ------------ | ------------ | ------- | ----- |
+| Champion       | 2.101       | 3.850        | 10.161       | 6.389   | 3.936 |
+| Baseline       | 2.277       | 3.974        | 9.882        | 6.445   | 3.988 |
+| Mean reference | 7.996       | 5.683        | 26.558       | 21.464  | 8.396 |
 
 The champion's mean error (prediction minus actual) is -0.417 minutes. The champion is a random forest with max_depth 29, max_features sqrt, max_samples 0.9063233020424546, min_samples_leaf 15 and n_estimators 144, trained on the 300,000-trip sample. Its model file is 184,003,446 bytes (184.0 MB) and one prediction takes 3.2 ms (limits: 300 MB and 50 ms).
 
@@ -105,7 +99,7 @@ The answer holds `prediction_minutes` and `model_version`. `GET /health` returns
 - Record the Python version on the logged model, so a load can be checked against it.
 - A Docker container for the API. `pyproject.toml` lists only `src/taxi_duration` as a package, so it must also include `src/app`.
 - Cleanup:
-  - Some modules call other modules' private helpers (train.py uses private source_hash helpers, tune.py uses train._experiment_id). Make them public or move them.
+  - Some modules call other modules' private helpers (train.py uses private source_hash helpers, tune.py uses train.\_experiment_id). Make them public or move them.
   - Some tests patch long lists of names and break when code moves. Use fewer, more stable patch points.
   - verify_model.main shows a traceback when MLFLOW_TRACKING_URI is unset. Print a short message and exit with a code.
   - run_baseline runs without logging to MLflow when MLFLOW_TRACKING_URI is unset, with no message. It should print a warning.
@@ -186,7 +180,7 @@ If you create a notebook to explore the data, select the Python environment crea
 
 ## How to Use This Repo
 
-1. Read the assignment brief in [project-description.md](project-description.md).
+1. Read the brief in [project-description.md](project-description.md).
 2. Download and inspect the January 2025 Yellow Taxi dataset.
 3. Train a baseline `RandomForestRegressor` and track runs locally with MLflow.
 4. Refactor preprocessing and training logic into reusable Python modules.
